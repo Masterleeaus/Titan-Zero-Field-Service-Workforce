@@ -41,12 +41,20 @@ liveness/storage, but readiness stays 503 and conversation ingress stays disable
 The production dependency factory optionally loads the absolute
 `WORKFORCE_DIRECTADMIN_DEPENDENCIES_MODULE`. That operator-owned module exports
 `createWorkforceDirectAdminDependencies()` and returns the existing
-`{ publicOrigin, createGateway(owners) }` mount seam. It must compose the canonical
-#1049 gateway with the #302 identity/credential producer. If omitted, the
-DirectAdmin routes remain disabled; if configured but invalid, startup fails.
+`{ publicOrigin, createGateway(owners, bootstrapNonceFlow?), bootstrapNonceFlow? }`
+mount seam. It must compose the canonical #1049 gateway with the #302
+identity/credential producer. When configured, `bootstrapNonceFlow` is the same
+canonical #302 flow instance passed as the second `createGateway` argument and
+used by its assertion provider; it exposes
+`issueNonceForUniqueCurrentContext({ origin, cookie, authorization: null })`.
+The Workforce server mounts `/v1/directadmin/bootstrap-nonce` around that
+operator gateway. If the flow is omitted, that path remains mounted as a
+sanitized 503 and fails closed. If the module is omitted, DirectAdmin routes
+remain disabled; if configured but invalid, startup fails.
 The module must be included in the reviewed image or mounted read-only through
 an operator Compose override; the base Compose file does not mount this optional
-file. The Workforce host does not supply an assertion issuer or nonce store.
+file. The Workforce host does not supply an assertion issuer, nonce store, or
+identity mapping.
 
 Use `createWorkforceSessionCredentialVerifier` from
 `services/workforce/src/session-credential-verifier.ts` for canonical #302 signed
@@ -75,20 +83,43 @@ checks the incoming Host against that origin, forwards only the headers the
 shared SDK consumes, and never forwards the Workforce `Authorization` token.
 Without the separate bridge composition, DirectAdmin paths return read-only
 503. No audience or issuer is synthesized by the Workforce host.
-The #1049 bootstrap provider contract merged as PR #1252. The #302 producer
-merged as PR #1263: it authenticates the supplied DirectAdmin Cookie
-against the configured `/api/session`, then calls an injected
-`DirectAdminBootstrapNonceConsumer` with the verified issuer/effective subject,
-presentation role, login-as provenance and nonce. That consumer must atomically
-return the current selected company/device. The #1263 tests use an in-memory
-`Set`; it does not provide the production durable nonce consumer. The #812 RAW
-relay core accepts only the `__Host-titan-da-session` cookie and drops other
-cookie names; its production loader currently fails closed with
-`cookie_boundary_unverified`. The producer needs the authenticated
-pre-authentication DirectAdmin `/api/session` cookie, so the existing relay
-contract and disabled production path do not yet complete bootstrap together.
-Keep the optional module unset until the durable consumer and authenticated
-proof transport are both supplied by their owners.
+The first-session nonce route validates exact same-origin POST transport,
+`Sec-Fetch-Site: same-origin`, an empty body and only the DirectAdmin `session`
+and `key` cookies before it calls `issueNonceForUniqueCurrentContext`. That
+canonical flow authenticates the cookies with the configured DirectAdmin
+`/api/session`, requires exactly one current company/device binding and returns
+an opaque nonce to the caller; the tuple is not included in the browser
+response. At redemption the role handler sends the nonce, filtered DirectAdmin
+cookies and any existing `__Host-titan-da-session` cookie to
+`/v1/directadmin/bootstrap`. The canonical gateway authenticates the prior
+Titan cookie, strips it from the proof, consumes the nonce once, signs the
+assertion, and passes that assertion with the same company/device expectation
+to `sessions.issue`.
+
+The packaged role RAW handlers expose these same-origin POST URLs to #1050's
+browser client:
+
+| DirectAdmin role | Nonce route | Session redemption route |
+| --- | --- | --- |
+| Admin | `/CMD_PLUGINS_ADMIN/titan_workforce/bootstrap-nonce.raw` | `/CMD_PLUGINS_ADMIN/titan_workforce/bootstrap.raw` |
+| Reseller | `/CMD_PLUGINS_RESELLER/titan_workforce/bootstrap-nonce.raw` | `/CMD_PLUGINS_RESELLER/titan_workforce/bootstrap.raw` |
+| User | `/CMD_PLUGINS/titan_workforce/bootstrap-nonce.raw` | `/CMD_PLUGINS/titan_workforce/bootstrap.raw` |
+
+Append `?headers_to_env=yes&pipe_post=yes` exactly to each RAW URL; no extra
+query parameters are accepted.
+
+The browser sends POST requests with same-origin credentials and an empty body;
+redemption includes `X-Titan-DA-Bootstrap-CSRF` with the opaque nonce. The role
+RAW handlers call the fixed `127.0.0.1:3010` Workforce listener directly for
+`/v1/directadmin/bootstrap-nonce` and `/v1/directadmin/bootstrap`; they do not
+widen the generic #812 relay cookie allowlist. Both paths require DirectAdmin's `headers_to_env=yes` and
+`pipe_post=yes` RAW transport and fail closed on malformed, duplicated or
+uncommissioned requests. The deployed DirectAdmin panel must still verify the
+official URL-encoded `HEADERS` transport behavior before release. Keep the
+operator module disabled until its durable nonce consumer, same-flow gateway
+composition, protected private listener and production identity mappings are
+commissioned. No live panel or production store is certified by disposable
+tests.
 
 The Workforce gateway owner builds
 `GET /v1/directadmin/titan_workforce/projection` from company-filtered canonical

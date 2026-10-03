@@ -68,9 +68,15 @@ async function loadDirectAdminDependencies(environment: WorkforceEnvironment): P
   if (typeof candidate.publicOrigin !== "string" || typeof candidate.createGateway !== "function") {
     throw new Error("workforce-directadmin-dependencies-invalid");
   }
+  const nonceFlow = candidate.bootstrapNonceFlow;
+  if (nonceFlow !== undefined && (!nonceFlow || typeof nonceFlow !== "object" || Array.isArray(nonceFlow)
+    || typeof (nonceFlow as Record<string, unknown>).issueNonceForUniqueCurrentContext !== "function")) {
+    throw new Error("workforce-directadmin-dependencies-invalid");
+  }
   return Object.freeze({
     publicOrigin: candidate.publicOrigin,
     createGateway: candidate.createGateway as DirectAdminDependencies["createGateway"],
+    ...(nonceFlow === undefined ? {} : { bootstrapNonceFlow: nonceFlow as DirectAdminDependencies["bootstrapNonceFlow"] }),
   });
 }
 

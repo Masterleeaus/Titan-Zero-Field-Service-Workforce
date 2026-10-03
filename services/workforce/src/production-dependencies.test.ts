@@ -188,7 +188,9 @@ test("production dependency factory mounts the operator DirectAdmin gateway and 
   const webPath = join(root, "titan-zero.db");
   const companyRoot = join(root, "company-stores");
   const observationPath = join(root, "gateway-request.json");
+  const nonceObservationPath = join(root, "nonce-flow-request.json");
   const modulePath = join(root, "directadmin-dependencies.mjs");
+  const invalidModulePath = join(root, "invalid-directadmin-dependencies.mjs");
   const { environment } = productionEnvironment({ root, identityPath, runtimePath, webPath, companyRoot });
   const identity = createSqliteStorage(identityPath);
   let dependencies: Awaited<ReturnType<typeof createWorkforceDependencies>> | undefined;
@@ -204,15 +206,36 @@ test("production dependency factory mounts the operator DirectAdmin gateway and 
     }), /workforce-production-path-invalid:WORKFORCE_DIRECTADMIN_DEPENDENCIES_MODULE/,
       "an invalid configured provider path fails startup rather than silently disabling the mount");
 
+    writeFileSync(invalidModulePath, `
+      export async function createWorkforceDirectAdminDependencies() {
+        return { publicOrigin: "https://panel.test.invalid", createGateway() { return async () => new Response(); },
+          bootstrapNonceFlow: {} };
+      }
+    `, { mode: 0o600 });
+    await assert.rejects(createWorkforceDependencies({
+      ...environment,
+      WORKFORCE_DIRECTADMIN_DEPENDENCIES_MODULE: invalidModulePath,
+    }), /workforce-directadmin-dependencies-invalid/,
+      "a configured malformed bootstrap flow is rejected during operator module loading");
+
     writeFileSync(modulePath, `
       import { writeFileSync } from "node:fs";
       export async function createWorkforceDirectAdminDependencies() {
+        const bootstrapNonceFlow = {
+          async issueNonceForUniqueCurrentContext(proof) {
+            writeFileSync(${JSON.stringify(nonceObservationPath)}, JSON.stringify(proof));
+            return { csrf_nonce: "N".repeat(43), expires_at: "2026-10-02T15:32:00.000Z",
+              company_id: "cleaning-company-1", device_id: "cleaning-device-1" };
+          },
+        };
         return {
           publicOrigin: "https://panel.test.invalid",
-          createGateway(owners) {
+          bootstrapNonceFlow,
+          createGateway(owners, suppliedNonceFlow) {
             if (typeof owners?.projection !== "function" || typeof owners?.requestIntent !== "function") {
               throw new Error("canonical-workforce-owners-required");
             }
+            if (suppliedNonceFlow !== bootstrapNonceFlow) throw new Error("canonical-bootstrap-flow-required");
             return async request => {
               writeFileSync(${JSON.stringify(observationPath)}, JSON.stringify({
                 method: request.method,
@@ -238,6 +261,7 @@ test("production dependency factory mounts the operator DirectAdmin gateway and 
     });
     assert.equal(dependencies.directAdmin?.publicOrigin, "https://panel.test.invalid");
     assert.equal(typeof dependencies.directAdmin?.createGateway, "function");
+    assert.equal(typeof dependencies.directAdmin?.bootstrapNonceFlow?.issueNonceForUniqueCurrentContext, "function");
     host = await createWorkforceServer({ storagePath: runtimePath, dependencies });
     await new Promise<void>((resolve, reject) => {
       host!.server.once("error", reject);
@@ -248,6 +272,27 @@ test("production dependency factory mounts the operator DirectAdmin gateway and 
     const baseUrl = `http://127.0.0.1:${address.port}`;
     const nonce = "N".repeat(43);
     const directAdminCookie = "session=disposable-browser-session";
+
+    const nonceResponse = await requestHttp(`${baseUrl}/v1/directadmin/bootstrap-nonce`, {
+      method: "POST",
+      headers: {
+        host: "panel.test.invalid",
+        origin: "https://panel.test.invalid",
+        "sec-fetch-site": "same-origin",
+        cookie: "session=disposable-browser-session; key=disposable-browser-key",
+        authorization: "Bearer caller-controlled-token",
+        "x-titan-company-id": "caller-selected-company",
+      },
+      body: "",
+    });
+    assert.equal(nonceResponse.status, 200, nonceResponse.body);
+    assert.deepEqual(JSON.parse(nonceResponse.body), { csrf_nonce: nonce },
+      "the mounted private nonce route returns only its opaque value, not the canonical cleaning tuple");
+    assert.deepEqual(JSON.parse(readFileSync(nonceObservationPath, "utf8")), {
+      origin: "https://panel.test.invalid",
+      cookie: "session=disposable-browser-session; key=disposable-browser-key",
+      authorization: null,
+    }, "the actual Workforce listener passes only the filtered DA session proof to the configured #302 flow");
 
     const bootstrap = await requestHttp(`${baseUrl}/v1/directadmin/bootstrap`, {
       method: "POST",

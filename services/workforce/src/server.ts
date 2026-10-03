@@ -7,6 +7,7 @@ import { createSqliteStorage, type StorageClient } from "../../../packages/stora
 import { SqliteWorkforceStore } from "./sqlite-store.js";
 import { createHostedRuntime, type HostedWorkforceDependencies } from "./hosted-runtime.js";
 import { createDirectAdminWorkforceOwners, type DirectAdminFetchHandler } from "./directadmin-workforce-owners.js";
+import { withDirectAdminBootstrapNonceRoute } from "./directadmin-bootstrap-nonce-route.js";
 import { handleConversationRequest, readConversationBody, writeConversationResponse, conversationHttpStatus } from "./conversation-api.js";
 
 // @ts-expect-error Canonical execution boundary is JavaScript.
@@ -135,8 +136,12 @@ export async function createWorkforceServer(options: WorkforceServerOptions = {}
       hosted = await createHostedRuntime(storage, identityStorage, dependencies, lifecycle.signal);
       if (dependencies.directAdmin) {
         const owners = createDirectAdminWorkforceOwners(hosted.runtime);
-        directAdmin = dependencies.directAdmin.createGateway(owners);
-        if (typeof directAdmin !== "function") throw new Error("workforce-directadmin-gateway-invalid");
+        const gateway = dependencies.directAdmin.createGateway(owners, dependencies.directAdmin.bootstrapNonceFlow);
+        if (typeof gateway !== "function") throw new Error("workforce-directadmin-gateway-invalid");
+        directAdmin = withDirectAdminBootstrapNonceRoute(gateway, {
+          publicOrigin: dependencies.directAdmin.publicOrigin,
+          flow: dependencies.directAdmin.bootstrapNonceFlow,
+        });
       }
     }
   } catch (error) {

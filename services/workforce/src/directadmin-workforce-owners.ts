@@ -4,6 +4,7 @@ import type { StorageClient } from "../../../packages/storage/src/index.js";
 import type { WorkItem, WorkforceStore, WorkforceWorker, WorkforceWorkerStore } from "./index.js";
 import type { SqliteWorkforceStore } from "./sqlite-store.js";
 import type { WorkforceZeroBridgeContext, WithWorkforceZeroSession } from "../../../packages/titan-platform/src/directadmin-session-bridge.js";
+import type { DirectAdminBootstrapNonceFlow } from "./directadmin-bootstrap-nonce-route.js";
 import { projectDirectAdminWorkforceSkills, type CanonicalWorkforceSkillSource } from "./directadmin-workforce-skills.js";
 // @ts-expect-error Canonical authority owner is JavaScript.
 import { AuthorityContextResolver, RuntimeAuthorityGateway, SqliteAuthorityStore, SqliteWorkerAccessStore, WorkerAccessResolver, CapabilityRequirementResolver, assertAuthorityDecisionAllowsExecution } from "../../../packages/runtime/authority/index.mjs";
@@ -61,7 +62,8 @@ export type DirectAdminGatewayOwners = Readonly<{
 }>;
 
 export type DirectAdminFetchHandler = (request: Request) => Promise<Response>;
-export type DirectAdminGatewayFactory = (owners: DirectAdminGatewayOwners) => DirectAdminFetchHandler;
+export type DirectAdminGatewayFactory = (owners: DirectAdminGatewayOwners,
+  bootstrapNonceFlow?: DirectAdminBootstrapNonceFlow) => DirectAdminFetchHandler;
 
 export type DirectAdminWorkforceRuntime = Readonly<{
   storage: StorageClient;
