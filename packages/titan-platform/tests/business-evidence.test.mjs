@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acceptBusinessEvidence, foldJobReality } from "../.test-dist/src/business-evidence.js";
+import { acceptBusinessEvidence, foldJobReality } from "../.test-dist/business-evidence.js";
 
 const base = {
   evidence_version: 1,
