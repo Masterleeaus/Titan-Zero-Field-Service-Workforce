@@ -52,12 +52,13 @@ The currently implemented `packages/storage` native manifest remains an explicit
 bounded bootstrap profile, not that complete mature migration family. Its immutable
 `company-native-work-orders-v1` profile stays available to verify existing stores
 and backups; the additive `company-native-work-orders-visits-v2` profile adds only
-the canonical visit-to-`work_order_tasks` plan relation. Fresh placements use v2.
-The fresh-only initializer also accepts an explicitly registered v1 schema
-version for existing native consumers; the default placement provisioner selects
-v2. Selecting v1 never upgrades or changes an existing store.
-There is no implicit in-place v1 upgrade: existing v1 stores remain v1 until a
-placement owner publishes a maintenance-gated migration coordinator. A consumer
+the canonical visit-to-`work_order_tasks` plan relation. The additive
+`company-native-visit-checklist-v3` profile adds visit-local disposition and note
+fields to that relation; it does not alter work-order task lifecycle state or add
+an evidence table. The current default placement provisioner still selects v2.
+The fresh-only initializer accepts registered versions only for a genuinely empty
+store; selecting a version never upgrades or changes an existing store. Existing
+v1/v2 stores need a maintenance-gated migration coordinator before using v3. A consumer
 must declare the schema version its operation needs and verify the matching
 company/placement/revision marker, manifest digest, migration ledger and live
 schema before invoking business work. A registry `READY` row alone is not a

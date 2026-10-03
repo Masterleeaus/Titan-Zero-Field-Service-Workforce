@@ -7,7 +7,7 @@ import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { tsImport } from 'tsx/esm/api';
 import * as security from '../.test-dist/security-boundary.js';
-const { createSqliteStorage } = await tsImport('@titan-zero/storage', { parentURL: import.meta.url, tsconfig: false });
+const { createSqliteStorage, openExistingSqliteStorage } = await tsImport('@titan-zero/storage', { parentURL: import.meta.url, tsconfig: false });
 const NOW = '2026-10-02T00:00:00Z';
 const EXPIRY = '2026-10-02T01:00:00Z';
 const principal = { provider: 'directadmin:node-1', subject: 'host-account-17' };
@@ -172,11 +172,36 @@ test('registry initialization is versioned, idempotent, and does not backfill le
   await assert.rejects(security.createIdentitySessionRegistry({ storage, storage_role: 'GLOBAL_REGISTRY' }), /schema-version/);
 });
 
+test('production registry opener rejects an uncommissioned store without creating schema', async t => {
+  const storage = createSqliteStorage(':memory:');
+  t.after(() => storage.close());
+  await assert.rejects(security.openIdentitySessionRegistry({ storage, storage_role: 'GLOBAL_REGISTRY' }), /schema-version-required/);
+  assert.deepEqual((await storage.query("SELECT name FROM sqlite_master WHERE type='table'")).rows, []);
+});
+
+test('production registry opener reuses existing identity state without migration or backfill', async t => {
+  const storage = createSqliteStorage(':memory:');
+  t.after(() => storage.close());
+  const provisioned = await security.createIdentitySessionRegistry({ storage, storage_role: 'GLOBAL_REGISTRY' });
+  await provisioned.putActor({ actor_id: 'stable-user-17', status: 'active' }, null);
+  await provisioned.putCompany({ company_id: 'company-a', status: 'active' }, null);
+  await provisioned.putMembership({ actor_id: 'stable-user-17', company_id: 'company-a', role: 'owner', status: 'active' }, null);
+  await provisioned.putDevice({ device_id: 'device-1', actor_id: 'stable-user-17', status: 'active' }, null);
+  await provisioned.putExternalBinding({ ...principal, binding_id: 'mapping-a', actor_id: 'stable-user-17', company_id: 'company-a', status: 'active' }, null);
+  const before = (await storage.query('SELECT version FROM titan_security_migrations')).rows;
+  const registry = await security.openIdentitySessionRegistry({ storage, storage_role: 'GLOBAL_REGISTRY' });
+  assert.deepEqual((await storage.query('SELECT version FROM titan_security_migrations')).rows, before);
+  assert.equal((await storage.query('SELECT COUNT(*) AS count FROM titan_security_actors')).rows[0].count, 1);
+  const issued = await registry.issueSession({ ...principal, session_id: 'session-1', device_id: 'device-1', company_id: 'company-a', audience: 'titan-workforce', issued_at: NOW, expires_at: EXPIRY }, NOW);
+  assert.equal((await registry.resolveCurrentSession({ ...proof(), session_revision: issued.session_revision }, expected, NOW)).actor_id, 'stable-user-17');
+});
+
 test('company-business storage roles and unsupported SQL dialects are rejected', async t => {
   const storage = createSqliteStorage(':memory:');
   t.after(() => storage.close());
   await assert.rejects(security.createIdentitySessionRegistry({ storage, storage_role: 'COMPANY_NATIVE_FSM' }), /storage-role/);
   await assert.rejects(security.createIdentitySessionRegistry({ storage: { ...storage, dialect: 'postgres' }, storage_role: 'GLOBAL_REGISTRY' }), /dialect/);
+  await assert.rejects(security.openIdentitySessionRegistry({ storage: { ...storage, dialect: 'postgres' }, storage_role: 'GLOBAL_REGISTRY' }), /dialect/);
 });
 
 test('current membership and session revocation survive independent connection restart', async t => {
