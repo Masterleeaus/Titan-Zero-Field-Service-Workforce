@@ -1,4 +1,4 @@
-![Titan Zero Field Service Workforce — FIELD + HOME SERVICES · CANONICAL PRODUCT](docs/images/portfolio-banner.svg)
+![Titan Zero Field Service Workforce — FIELD + HOME SERVICES · CANONICAL PRODUCT](docs/images/workforce-banner.svg)
 
 <p align="center">
   <img src="docs/images/CB4FE4C8-1FF9-4228-8DAC-98FED23D43A3.png" alt="Titan Zero Field Service Workforce" width="520" />
@@ -56,6 +56,10 @@ Customers / Staff / Owners / Systems
                  v
         Evidence + State + Outcomes
 ```
+
+<p align="center">
+  <img src="docs/images/workforce-architecture.svg" alt="Titan Zero Field Service Workforce dataflow from interaction and signal through decision, authority, Nexus workforce orchestration, operations, and evidence" width="100%" />
+</p>
 
 Titan Zero separates **understanding**, **decision-making**, **authority**, and **execution**. A model producing a recommendation does not automatically gain permission to act.
 
