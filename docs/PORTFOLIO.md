@@ -1,6 +1,6 @@
 # Portfolio engineering guide
 
-This guide is a code-oriented companion to the root README. It describes the implementation visible on current `main` at `e0fc40f4f788d8af963baa44a4339627d2a5a680`; it does not promote unpublished local work or open draft PRs into the public product.
+This guide is a code-oriented companion to the root README. It describes the implementation visible on current `main` at `7606e5594dc45dcebf65d063eeb971437ea67fea`; it does not promote unpublished local work or open draft PRs into the public product.
 
 ## Problem and architecture
 
@@ -43,7 +43,7 @@ pnpm dev:web
 
 The commands map directly to checked-in implementation:
 
-- `pnpm db:migrate` → `scripts/sqlite-migrate.mjs` → `db/sqlite/` and the `SQLITE_PATH` from `.env` (default `./data/titan-zero.db`).
+- `pnpm db:migrate` → `scripts/sqlite-migrate.mjs` → `db/sqlite/` and the `SQLITE_PATH` from `.env` (default `.titan/data/titan-zero.db`).
 - `pnpm db:migrate:server` → `scripts/db-migrate.sh` → `db/migrations/`; this is the legacy shared-PostgreSQL compatibility path and requires `MIGRATION_DATABASE_URL` or `DATABASE_URL`.
 - `pnpm gate:fast` runs `scripts/gate.sh --fast`; it invokes Bash and covers lint, migration-manifest/RLS checks, typecheck, build, and unit tests. The full `pnpm gate` additionally starts an ephemeral PostgreSQL container and runs integration/E2E phases.
 - `pnpm --filter @titan-zero/titan-platform test:workforce-native` runs `packages/titan-platform/scripts/test-workforce-native.mjs`, compiling the native Workforce source and exercising the selected contract, six-agent, workflow, and Pass10 parity tests without provider credentials or live authority.
