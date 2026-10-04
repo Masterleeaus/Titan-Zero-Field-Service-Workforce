@@ -1,16 +1,18 @@
-![Titan Zero Field Service Workforce — FIELD + HOME SERVICES · CANONICAL PRODUCT](docs/images/workforce-banner.svg)
+<div align="center">
 
-<p align="center">
-  <img src="docs/images/CB4FE4C8-1FF9-4228-8DAC-98FED23D43A3.png" alt="Titan Zero Field Service Workforce" width="520" />
-</p>
+# Titan Field
 
-# Titan Zero Field Service Workforce
+**Scheduling, dispatch, field execution and operational standards for the Titan suite.**
 
-**Governed AI workforce for field-service operations**
+**Current product name:** Titan Field · **Repository slug:** `Titan-Zero-Field-Service-Workforce` (retained for compatibility)
+
+</div>
+
+> Branding note: legacy `Titan Zero Field Service Workforce` image/file names remain in the repository so code paths and historical links are not broken. Customer-facing naming should use **Titan Field**.
 
 ## Overview
 
-Titan Zero Field Service Workforce is a TypeScript operating platform for companies that coordinate office teams, field workers, customers, and connected systems. It combines scheduling, dispatch, work execution, customer care, authority controls, and evidence into one company-scoped workflow.
+Titan Field is a TypeScript operating platform for companies that coordinate office teams, field workers, customers, and connected systems. It combines scheduling, dispatch, work execution, customer care, authority controls, and evidence into one company-scoped workflow.
 
 The platform is designed for operations teams that need intelligent assistance to move work forward while keeping every consequential action attributable, reviewable, and reversible.
 
