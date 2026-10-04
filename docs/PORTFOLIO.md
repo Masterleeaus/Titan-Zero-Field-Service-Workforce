@@ -1,6 +1,6 @@
 # Portfolio engineering guide
 
-This guide is a code-oriented companion to the root README. It describes the implementation visible on the portfolio-cleanup base snapshot `e7085a48d7a548875ab6b863e491c9a60c97c295`; it does not promote unpublished local work or open draft PRs into the public product.
+This guide is a code-oriented companion to the root README. It describes the implementation visible on current `main` at `e0fc40f4f788d8af963baa44a4339627d2a5a680`; it does not promote unpublished local work or open draft PRs into the public product.
 
 ## Problem and architecture
 
@@ -32,28 +32,32 @@ The key trade-off is deliberate separation: model output, a proposed decision, a
 
 ## Quickstart
 
-Prerequisites are Node.js `>=20.9.0`, pnpm `9.12.0`, and Docker/Compose for the development services.
+Pre## Quickstart
+
+For a clean checkout, use the repository's default SQLite path. Node.js `>=20.9.0` and pnpm `9.12.0` are required. Docker/Compose and Bash are only needed for the full gate or the optional legacy PostgreSQL path.
 
 ```bash
 cp .env.example .env
 pnpm install
-docker compose -f infra/compose.dev.yml up -d postgres redis
 pnpm db:migrate
 pnpm dev:web
 ```
 
-Useful repository gates are declared in the root `package.json`:
+The commands map directly to checked-in implementation:
+
+- `pnpm db:migrate` → `scripts/sqlite-migrate.mjs` → `db/sqlite/` and the `SQLITE_PATH` from `.env` (default `./data/titan-zero.db`).
+- `pnpm db:migrate:server` → `scripts/db-migrate.sh` → `db/migrations/`; this is the legacy shared-PostgreSQL compatibility path and requires `MIGRATION_DATABASE_URL` or `DATABASE_URL`.
+- `pnpm gate:fast` runs `scripts/gate.sh --fast`; it invokes Bash and covers lint, migration-manifest/RLS checks, typecheck, build, and unit tests. The full `pnpm gate` additionally starts an ephemeral PostgreSQL container and runs integration/E2E phases.
+
+The checked-in `infra/compose.dev.yml` defines `postgres` only; it has no Redis service, so a clean-checkout bootstrap should not request `redis` from that file. Start it only for an intentional compatibility/PostgreSQL run:
 
 ```bash
-pnpm typecheck
-pnpm test:unit
-pnpm test:integration
-pnpm test:e2e
-pnpm gate:fast
-pnpm gate
+docker compose -f infra/compose.dev.yml up -d postgres
 ```
 
-The commands are the checked-in contract; this portfolio pass did not run them from a clean checkout.
+Then provide a PostgreSQL `DATABASE_URL` or `MIGRATION_DATABASE_URL` before invoking `pnpm db:migrate:server`. On Windows, run the Bash-based gate/migration scripts from Git Bash or WSL. The default local quickstart above remains SQLite-backed.
+
+The commands are checked-in contracts; this portfolio pass did not run them from a clean checkout.
 
 ## Evidence and tests
 
