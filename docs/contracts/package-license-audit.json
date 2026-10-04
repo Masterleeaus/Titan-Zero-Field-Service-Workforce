@@ -132,7 +132,7 @@
       "name": "@titan-zero/titan-platform",
       "private": true,
       "license": "NOASSERTION",
-      "sha256": "e5fb201791b4cbffa2c4d0c4eb14873a6cbdd8e87aa45a11bddc0323af25a2f3"
+      "sha256": "94021a6899b6a610cfc71b8f9679a5f9c0ac329eb25a7a3cc82c342e2f88c261"
     },
     {
       "path": "packages/workforce/package.json",
