@@ -722,6 +722,40 @@ function directadmin_git_read_pointer($file,$label,$base,$home,$expectDirectory)
  if(preg_match($pattern,$raw,$matches)!==1) return null;
  return directadmin_git_resolve_path($matches[1],$base,$home,$expectDirectory);
 }
+function directadmin_git_filter_names($context){
+ if(!is_array($context)||!isset($context['git_dir'],$context['common_dir'])) return null;
+ $paths=[];
+ foreach([$context['git_dir'].'/config',$context['git_dir'].'/config.worktree',$context['common_dir'].'/config'] as $path){
+  if(in_array($path,$paths,true)) continue;
+  $paths[]=$path;
+  if(@lstat($path)===false) continue;
+  $contents=@file_get_contents($path);
+  if(!is_string($contents)||strlen($contents)>1048576) return null;
+  // Included config can introduce filter commands after this check. Refuse it
+  // rather than trying to model Git's include resolution at request time.
+  if(preg_match('/^\s*(?:include(?:If)?\.|\[include(?:If)?(?:\s+"[^"]*")?\])\s*/mi',$contents)===1) return null;
+  $sections=[];
+  if(preg_match_all('/^\s*\[filter\s+"([^"]*)"\]\s*$/mi',$contents,$sections)===false) return null;
+  foreach($sections[1]??[] as $name){
+   if(!preg_match('/\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z/D',$name)) return null;
+   $names[$name]=true;
+  }
+  $matches=[];
+  if(preg_match_all('/^\s*filter\.([A-Za-z0-9][A-Za-z0-9._-]{0,63})\.(?:process|clean|smudge|required)\s*=/mi',$contents,$matches)===false) return null;
+  foreach($matches[1]??[] as $name) $names[$name]=true;
+ }
+ return array_keys($names??[]);
+}
+function directadmin_git_filter_config_args($context){
+ $names=directadmin_git_filter_names($context);
+ if($names===null) return null;
+ $args=[];
+ foreach($names as $name){
+  foreach(['process','clean','smudge'] as $operation){$args[]='-c';$args[]='filter.'.$name.'.'.$operation.'=';}
+  $args[]='-c';$args[]='filter.'.$name.'.required=false';
+ }
+ return $args;
+}
 function directadmin_git_alternates_safe($objects,$home){
  if(@lstat($objects)===false) return true;
  if(!directadmin_git_metadata_path_safe($objects,$home,true)) return false;
@@ -806,7 +840,9 @@ function directadmin_git_command_args($context,$arguments){
    if(!in_array($flag,$arguments,true)) $arguments[]=$flag;
   }
  }
- return array_merge([
+  $filterArgs=directadmin_git_filter_config_args($context);
+  if($filterArgs===null) return null;
+  return array_merge([
   'git',
   '--git-dir',$context['git_dir'],
   '--work-tree',$context['root'],
@@ -817,7 +853,7 @@ function directadmin_git_command_args($context,$arguments){
   '-c','credential.helper=',
   '-c','diff.external=',
   '--no-pager'
- ],$arguments);
+  ],$filterArgs,$arguments);
 }
 function directadmin_git_environment(){
  return [
@@ -833,7 +869,9 @@ function directadmin_git_environment(){
  ];
 }
 function directadmin_git_probe($context,$arguments){
- $argv=array_merge(['/usr/bin/env','timeout','5s'],directadmin_git_command_args($context,$arguments));
+ $commandArguments=directadmin_git_command_args($context,$arguments);
+ if($commandArguments===null) return ['status'=>'unknown','output'=>null,'reason'=>'unsafe_filter_config'];
+ $argv=array_merge(['/usr/bin/env','timeout','5s'],$commandArguments);
  $spec=[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']];
  $restore=directadmin_terminal_enter_verified_cwd($context['root']??null);
  if($restore===null) return ['status'=>'unknown','output'=>null,'reason'=>'cwd_changed'];
@@ -976,7 +1014,8 @@ function run_cmd($cmd,$cwd){
  if(strtolower($parts[0])==='git'){
   $context=directadmin_git_repository_context($cwd);
   if($context===null) return ['Blocked by Developer Portal policy [READ]: Git worktree and metadata must resolve inside the account HOME.',126,'READ'];
-  $programParts=directadmin_git_command_args($context,array_slice($parts,1));
+   $programParts=directadmin_git_command_args($context,array_slice($parts,1));
+   if($programParts===null) return ['Blocked by Developer Portal policy [READ]: Repository Git filter configuration is not supported for account-terminal execution.',126,'READ'];
   $cwd=$context['root'];
   $environment=directadmin_git_environment();
  }

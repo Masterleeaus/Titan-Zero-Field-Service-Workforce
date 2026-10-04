@@ -176,6 +176,16 @@ function integration_git_command(string $cwd,array $arguments,array $environment
  integration_expect($exit===0,'synthetic Git setup command must succeed: '.implode(' ',$arguments).' '.trim($stderr));
  return trim($stdout);
 }
+function integration_git_capture(string $cwd,array $arguments,array $environment):array{
+ $descriptors=[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']];
+ $process=@proc_open(array_merge(['git','-C',$cwd],$arguments),$descriptors,$pipes,$cwd,$environment,['bypass_shell'=>true]);
+ integration_expect(is_resource($process),'synthetic Git capture command must start');
+ fclose($pipes[0]);
+ $stdout=(string)stream_get_contents($pipes[1]);
+ $stderr=(string)stream_get_contents($pipes[2]);
+ fclose($pipes[1]); fclose($pipes[2]);
+ return [proc_close($process),$stdout,$stderr];
+}
 
 function integration_ssh_wire_string(string $value):string{
  return pack('N',strlen($value)).$value;
@@ -598,6 +608,37 @@ integration_expect_transport_rejected($html,'multiple form actions','code=action
 
 $gitRepo=$homeA.'/git-remote-policy';
 integration_init_git_repo($gitRepo,$homeA);
+$filterRepo=$homeA.'/git-process-filter';
+integration_init_git_repo($filterRepo,$homeA);
+$filterMarker=$fixture.'/actual-role-filter-process-marker';
+$filterHelper=$fixture.'/actual-role-filter-process-helper';
+integration_expect(file_put_contents($filterHelper,"#!/bin/sh\nprintf invoked >> ".escapeshellarg($filterMarker)."\nexit 0\n")!==false,'actual-role process-filter helper must be written');
+integration_expect(chmod($filterHelper,0700),'actual-role process-filter helper must be executable');
+$filterEnvironment=[
+ 'PATH'=>getenv('PATH')?:'/usr/local/bin:/usr/bin:/bin',
+ 'HOME'=>$homeA,
+ 'GIT_CONFIG_NOSYSTEM'=>'1',
+ 'GIT_CONFIG_GLOBAL'=>'/dev/null',
+ 'GIT_TERMINAL_PROMPT'=>'0'
+];
+integration_expect(file_put_contents($filterRepo.'/.gitattributes',"*.synthetic filter=synthetic-process\n")!==false,'actual-role process-filter attribute must be written');
+integration_expect(file_put_contents($filterRepo.'/process.synthetic',"before\n")!==false,'actual-role process-filter fixture must be written');
+integration_git_command($filterRepo,['add','--','.gitattributes','process.synthetic'],$filterEnvironment);
+integration_git_command($filterRepo,['-c','user.name=DirectAdmin Fixture','-c','user.email=fixture@example.invalid','commit','--quiet','--message','process filter fixture'],$filterEnvironment);
+integration_git_command($filterRepo,['config','filter.synthetic-process.process',$filterHelper],$filterEnvironment);
+integration_expect(file_put_contents($filterRepo.'/process.synthetic',"after\n")!==false,'actual-role process-filter fixture must be changed');
+[$unboundedFilterExit,,]=integration_git_capture($filterRepo,['diff','--stat'],$filterEnvironment);
+integration_expect(is_file($filterMarker),'unbounded fixture Git diff must execute the synthetic process filter');
+if(is_file($filterMarker)) integration_expect(unlink($filterMarker),'actual-role process-filter marker must be reset before role execution');
+$filterFields=['csrf'=>$token,'cwd'=>$filterRepo,'command'=>'git diff --stat','run'=>'1'];
+$filterBody=http_build_query($filterFields,'','&',PHP_QUERY_RFC1738);
+$filterRoleEnvironment=$common+[
+ 'REQUEST_METHOD'=>'POST','SCRIPT_NAME'=>$route,'QUERY_STRING'=>'pipe_post=yes',
+ 'POST'=>'stdin=true','CONTENT_LENGTH'=>(string)strlen($filterBody)
+];
+[$filterRoleHtml]=integration_run_role($root,'admin',$filterRoleEnvironment,$filterBody);
+integration_expect(strpos($filterRoleHtml,'Exit code: 0')!==false,'actual admin role Git diff must remain successful with a hostile repository process filter configured');
+integration_expect(!is_file($filterMarker),'actual admin role Git diff must not execute the repository-configured process filter');
 $remoteUrl='https://synthetic-user:synthetic-token@example.invalid/repo.git';
 $gitConfig=$gitRepo.'/.git/config';
 $gitConfigBefore=hash_file('sha256',$gitConfig);
