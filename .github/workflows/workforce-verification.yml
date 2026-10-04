@@ -11,6 +11,7 @@ on:
       - 'packages/tools/**'
       - 'db/sqlite/**'
       - 'apps/directadmin/workforce/**'
+      - 'apps/web/**'
       - 'apps/directadmin/server-node/**'
       - 'scripts/package-directadmin-plugin.mjs'
       - 'package.json'
@@ -40,7 +41,16 @@ jobs:
           pnpm --filter @titan-zero/storage typecheck
           pnpm --filter @titan-zero/storage test
       - name: Focused company-storage web consumer test
-        run: pnpm --filter @titan-zero/web exec vitest run lib/company-storage/consumer.test.ts
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm --filter @titan-zero/web exec vitest run \
+            lib/company-storage/consumer.test.ts \
+            lib/company-storage/cleaning-profile-login.test.ts \
+            lib/company-storage/vertical-pack-profile.test.ts \
+            lib/auth/__tests__/session-context.test.ts \
+            lib/auth/__tests__/cleaning-browser-journey.test.ts \
+            lib/visits/__tests__/native-checklist-route.test.ts \
+            lib/auth/__tests__/post-login-destination.unit.test.ts
 
   directadmin-workforce:
     name: DirectAdmin Workforce Consumer

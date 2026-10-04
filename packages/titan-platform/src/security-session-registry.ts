@@ -302,6 +302,32 @@ async function migrate(storage: StorageClient): Promise<void> {
   });
 }
 
+/** Validate an already commissioned registry without creating or migrating any
+ * table. Runtime consumers should use this when production startup must never
+ * mutate identity/access state. */
+async function validateExistingSchema(storage: StorageClient): Promise<void> {
+  let versions: number[];
+  try {
+    versions = (await storage.query<{ version: number }>(
+      'SELECT version FROM titan_security_migrations ORDER BY version',
+    )).rows.map(row => row.version);
+  } catch {
+    throw new Error('identity-schema-version-required');
+  }
+  if (versions.length !== 1 || versions[0] !== 1) throw new Error('identity-schema-version-unsupported');
+  try {
+    await storage.query('SELECT actor_id,status,revision FROM titan_security_actors LIMIT 0');
+    await storage.query('SELECT company_id,status,revision FROM titan_security_companies LIMIT 0');
+    await storage.query('SELECT actor_id,company_id,role,status,revision FROM titan_security_memberships LIMIT 0');
+    await storage.query('SELECT device_id,actor_id,status,revision FROM titan_security_devices LIMIT 0');
+    await storage.query('SELECT binding_id,provider,subject,actor_id,company_id,status,revision FROM titan_security_external_bindings LIMIT 0');
+    await storage.query(`SELECT session_id,company_id,actor_id,device_id,binding_id,issued_at,expires_at,
+      revoked,revision,audience,context_generation FROM titan_security_sessions LIMIT 0`);
+  } catch {
+    throw new Error('identity-schema-incomplete');
+  }
+}
+
 /** Explicit, versioned add-on for short-lived DirectAdmin bootstrap nonces.
  * It is intentionally not called by createIdentitySessionRegistry or host
  * startup; commissioning must explicitly initialize this additive store. */
@@ -866,5 +892,16 @@ export async function createIdentitySessionRegistry(input: {
   if (input.storage_role !== 'GLOBAL_REGISTRY') throw new Error('identity-storage-role-required');
   if (input.storage.dialect !== 'sqlite') throw new Error('identity-storage-dialect-unsupported');
   await migrate(input.storage);
+  return new IdentitySessionRegistry(input.storage, input.now);
+}
+
+/** Open a previously commissioned GLOBAL_REGISTRY without running migrations,
+ * creating schema or backfilling any identity/access records. */
+export async function openIdentitySessionRegistry(input: {
+  storage: StorageClient; storage_role: 'GLOBAL_REGISTRY'; now?: () => Date;
+}): Promise<IdentitySessionRegistry> {
+  if (input.storage_role !== 'GLOBAL_REGISTRY') throw new Error('identity-storage-role-required');
+  if (input.storage.dialect !== 'sqlite') throw new Error('identity-storage-dialect-unsupported');
+  await validateExistingSchema(input.storage);
   return new IdentitySessionRegistry(input.storage, input.now);
 }

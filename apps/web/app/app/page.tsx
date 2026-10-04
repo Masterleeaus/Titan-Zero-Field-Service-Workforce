@@ -1,6 +1,14 @@
 import type { Route } from "next";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth/session";
+import { headers } from "next/headers";
+import { getWebSessionRuntime } from "@/lib/auth/web-session-runtime";
+import {
+  companyNativeVisitChecklistManifest,
+  companyNativeWorkOrdersManifest,
+  companyNativeWorkOrdersVisitsManifest,
+} from "../../../../packages/storage/src/company-native-schema-manifest";
+import { withVerifiedWebNativeCompanyStore } from "@/lib/company-storage/request-runtime";
+import { readCurrentCompanyVerticalProfile } from "@/lib/company-storage/cleaning-profile-entry";
 import { portableQuery } from "@/lib/db/portable";
 import { LinkButton, PageContainer, PageHeader, WhatNext } from "@/components/ui";
 import { OwnerDashboard } from "./OwnerDashboard";
@@ -16,6 +24,7 @@ import {
 } from "@/lib/captures/promise-queue";
 import { AttentionCard } from "./AttentionCard";
 import { bindNativeSurface } from "@/lib/navigation/native-service-bindings";
+import { CleaningHome } from "./CleaningHome";
 
 export const dynamic = "force-dynamic";
 
@@ -26,11 +35,29 @@ function parseN(row: CountRow | undefined | null): number {
 }
 
 export default async function AppPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
+  const request = { headers: await headers() };
+  const sessionRuntime = await getWebSessionRuntime();
+  const currentSession = await sessionRuntime.resolveRequest(request);
+  if (!currentSession) redirect("/login");
+  const session = currentSession.session;
   if (session.role === "tech") redirect("/app/my-work");
 
   bindNativeSurface("business", session.accountId);
+
+  const profile = await withVerifiedWebNativeCompanyStore({
+    currentSession,
+    revalidateSession: () => sessionRuntime.resolveRequest(request),
+    requiredSchemaVersions: [
+      companyNativeWorkOrdersManifest.schema_version,
+      companyNativeWorkOrdersVisitsManifest.schema_version,
+      companyNativeVisitChecklistManifest.schema_version,
+    ],
+    operation: (storage, verifiedSession) => readCurrentCompanyVerticalProfile({
+      scope: verifiedSession.scope,
+      storage,
+    }),
+  });
+  if (profile.profile?.module_id === "titan.workforce.cleaning") return <CleaningHome />;
 
   const accountId = session.accountId;
   const businessDate = businessToday();

@@ -1,4 +1,5 @@
 const required=(value,name)=>{const text=String(value??"").trim();if(!text)throw new Error(`execution-evidence-${name}-required`);return text;};
+const reference=(value,name)=>{if(typeof value!=="string")throw new Error(`execution-evidence-${name}-required`);const text=value.trim();if(!text||text.length>512||/[\u0000-\u001f\u007f]/.test(text))throw new Error(`execution-evidence-${name}-invalid`);return text;};
 
 const FACTUAL_STATES=new Set(["REQUESTED","AUTHORIZED","EXECUTING","PROVIDER_ACKNOWLEDGED","VERIFYING","VERIFIED","FAILED","UNCERTAIN"]);
 
@@ -28,7 +29,7 @@ export function executionEvidenceToBusinessEvidence(evidence,{projection_version
   decision_id:evidence?.decision_id??null,
   authority_decision_id:evidence?.authority_decision_id??null,
   execution_id,
-  verification_id:verified?required(evidence?.verification?.verification_id??evidence?.verification?.id??`verification:${execution_id}`,"verification-id"):null,
+  verification_id:verified?reference(evidence?.verification?.verification_id??evidence?.verification?.id,"verification-id"):null,
   projection_version,
   supersedes_evidence_id:null,
   provenance:Object.freeze({provider:evidence.provider,execution_class:evidence.execution_class,idempotency_key:evidence.idempotency_key,external_ref:evidence.external_ref??null}),

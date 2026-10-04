@@ -44,6 +44,7 @@ async function loadProfileMigration(path: string): Promise<string> {
   const sources: Readonly<Record<string, URL>> = {
     "db/sqlite/company-native/0001_work_orders.sql": new URL("../../../db/sqlite/company-native/0001_work_orders.sql", import.meta.url),
     "db/sqlite/company-native/0002_visit_tasks.sql": new URL("../../../db/sqlite/company-native/0002_visit_tasks.sql", import.meta.url),
+    "db/sqlite/company-native/0003_visit_checklist_state.sql": new URL("../../../db/sqlite/company-native/0003_visit_checklist_state.sql", import.meta.url),
   };
   const source = sources[path];
   if (!source) {

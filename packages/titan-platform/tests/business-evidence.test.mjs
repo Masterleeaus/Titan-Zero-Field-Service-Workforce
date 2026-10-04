@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acceptBusinessEvidence, foldJobReality } from "../.test-dist/src/business-evidence.js";
+import { acceptBusinessEvidence, foldJobReality } from "../.test-dist/business-evidence.js";
 
 const base = {
   evidence_version: 1,
@@ -53,4 +53,15 @@ test("cross-company evidence fails closed", () => {
 test("verified event requires verification reference and provider ACK cannot masquerade as verified", () => {
   assert.throws(() => acceptBusinessEvidence({ ...base, evidence_id: "bad-v", event_type: "job.status.verified", payload: { status: "completed" } }), /verification-required/);
   assert.throws(() => acceptBusinessEvidence({ ...base, evidence_id: "bad-ack", event_type: "execution.provider_acknowledged", verification_id: "verify-impossible", payload: {} }), /provider-ack-cannot-carry-verification/);
+});
+
+test("verification and supersession references reject empty, malformed, and whitespace-only values", () => {
+  for (const verification_id of ["", "   ", 7, {}, "verify-1\ninvalid"]) {
+    assert.throws(() => acceptBusinessEvidence({ ...base, evidence_id: "bad-ref", event_type: "job.status.verified",
+      verification_id, payload: { status: "completed" } }), /verification-id-(required|invalid)/);
+  }
+  for (const supersedes_evidence_id of ["", "   ", false, "parent\u0000id"]) {
+    assert.throws(() => acceptBusinessEvidence({ ...base, evidence_id: "bad-correction", event_type: "job.status.corrected",
+      supersedes_evidence_id, payload: { status: "in_progress" } }), /supersedes-evidence-id-(required|invalid)/);
+  }
 });

@@ -9,7 +9,7 @@ import type { StorageClient } from "../../../../packages/storage/src/index";
 import { NativeCompanyStoreCloseAfterOperationError, withNativeCompanyStore } from "./consumer";
 import { createSqliteStorage } from "../../../../packages/storage/src/sqlite-client";
 import { initializeFreshCompanyNativeStore } from "../../../../packages/storage/src/company-native-store-initializer";
-import { companyNativeWorkOrdersVisitsManifest } from "../../../../packages/storage/src/company-native-schema-manifest";
+import { companyNativeVisitChecklistManifest, companyNativeWorkOrdersVisitsManifest } from "../../../../packages/storage/src/company-native-schema-manifest";
 import type { CurrentWebSession } from "../auth/current-session";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
@@ -132,7 +132,10 @@ describe("native company-store consumer", () => {
       };
       await initializeSqliteCompanyPlacementRegistry({ storage: registryStorage, storage_role: "GLOBAL_REGISTRY" });
       const provisioned = await provisionSqliteCompanyPlacement({
-        registry: registryInput, company_id: "company-a", company_name: "Company A",
+        registry: registryInput,
+        company_id: "company-a",
+        company_name: "Company A",
+        schema_version: companyNativeVisitChecklistManifest.schema_version,
       });
       const registry = await createSqliteCompanyPlacementRegistry({ storage: registryStorage, storage_role: "GLOBAL_REGISTRY" });
       const resolver = createCompanyStorageResolver({
@@ -142,7 +145,7 @@ describe("native company-store consumer", () => {
       });
       const result = await withNativeCompanyStore({
         resolver, current_session: currentSession,
-        required_schema_version: companyNativeWorkOrdersVisitsManifest.schema_version,
+        required_schema_version: companyNativeVisitChecklistManifest.schema_version,
         operation: async client => ({
           file: (await client.query<{ file: string }>("PRAGMA database_list")).rows.find(row => row.file)?.file,
           companies: (await client.query<{ id: string }>("SELECT id FROM companies")).rows,

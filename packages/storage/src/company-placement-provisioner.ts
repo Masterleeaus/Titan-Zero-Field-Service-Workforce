@@ -2,7 +2,7 @@ import { mkdir, open, lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { createSqliteCompanyPlacementRegistryWriter, type GlobalRegistryStorageInput } from "./company-placement-registry.js";
 import { initializeFreshCompanyNativeStore } from "./company-native-store-initializer.js";
-import { companyNativeWorkOrdersVisitsManifest } from "./company-native-schema-manifest.js";
+import { companyNativeWorkOrdersVisitsManifest, getCompanyNativeSchemaManifest } from "./company-native-schema-manifest.js";
 import { createSqliteCompanyStoreOpener } from "./company-store-opener.js";
 import { openExistingSqliteStorage } from "./sqlite-client.js";
 import type { StorageClient } from "./index.js";
@@ -31,15 +31,19 @@ export async function provisionSqliteCompanyPlacement(input: {
   registry: SqliteCompanyPlacementProvisionerOptions;
   company_id: string;
   company_name: string;
+  /** Select a registered fresh-store profile. Omitted for the historical v2 default. */
+  schema_version?: string;
 }): Promise<{ company_id: string; placement_id: string; placement_revision: number; file_placement_id: string }> {
   const dbRoot = safeRoot(input.registry.companyStoreRoot);
   const fileRoot = safeRoot(input.registry.companyFileStoreRoot);
   await verifyDirectory(dbRoot);
   await verifyDirectory(fileRoot);
+  const schemaVersion = input.schema_version ?? companyNativeWorkOrdersVisitsManifest.schema_version;
+  if (!getCompanyNativeSchemaManifest(schemaVersion)) throw new Error("company-placement-schema-profile-unknown");
   const writer = await createSqliteCompanyPlacementRegistryWriter(input.registry);
   const reserved = await writer.beginProvisioning({
     company_id: input.company_id,
-    schema_version: companyNativeWorkOrdersVisitsManifest.schema_version,
+    schema_version: schemaVersion,
   });
   const dbPath = join(dbRoot, `${reserved.database.placement_id}.sqlite`);
   const filePath = join(fileRoot, reserved.files.file_placement_id);
