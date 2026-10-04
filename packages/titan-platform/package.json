@@ -60,6 +60,7 @@
     "test": "rm -rf .test-dist && tsc -p tsconfig.test.json --noEmit false --outDir .test-dist --module NodeNext --moduleResolution NodeNext --isolatedModules false && node --test ./tests/*.test.mjs",
     "test:cleaning": "rm -rf .cleaning-test-dist && tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --skipLibCheck --rootDir src --outDir .cleaning-test-dist src/verticals/cleaning/*.ts && node --test ./tests/cleaning-vertical-pass*.test.mjs",
     "test:unit": "rm -rf .test-dist && tsc -p tsconfig.test.json --noEmit false --outDir .test-dist --module NodeNext --moduleResolution NodeNext --isolatedModules false && node --test ./tests/*.test.mjs",
+    "test:workforce-native": "node scripts/test-workforce-native.mjs",
     "build": "tsc -p tsconfig.json --noEmit false --outDir dist --module NodeNext --moduleResolution NodeNext --isolatedModules false"
   }
 }
