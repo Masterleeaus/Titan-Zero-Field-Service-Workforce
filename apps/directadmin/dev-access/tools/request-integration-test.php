@@ -141,6 +141,11 @@ function integration_expect_successful_pwd(string $html,string $home):void{
  integration_expect(preg_match('~<div class="term">([^<]*)</div>~',$html,$matches)===1,'successful command output must render in the terminal');
  integration_expect(trim(htmlspecialchars_decode($matches[1],ENT_QUOTES))===$home,'pwd output must be limited to the selected account HOME');
 }
+function integration_expect_terminal_blocked(string $html,string $case,string $canary):void{
+ integration_expect(strpos($html,'Exit code: 126')!==false,$case.' must be rejected before command execution');
+ integration_expect(strpos($html,'Blocked by Developer Portal policy')!==false,$case.' must report the fixed terminal policy denial');
+ integration_expect(strpos($html,$canary)===false,$case.' must never render the synthetic secret canary');
+}
 function integration_init_git_repo(string $path,string $home):void{
  integration_expect(mkdir($path,0700,true),'isolated Git repository directory must be created');
  $descriptors=[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']];
@@ -170,6 +175,16 @@ function integration_git_command(string $cwd,array $arguments,array $environment
  $exit=proc_close($process);
  integration_expect($exit===0,'synthetic Git setup command must succeed: '.implode(' ',$arguments).' '.trim($stderr));
  return trim($stdout);
+}
+function integration_git_capture(string $cwd,array $arguments,array $environment):array{
+ $descriptors=[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']];
+ $process=@proc_open(array_merge(['git','-C',$cwd],$arguments),$descriptors,$pipes,$cwd,$environment,['bypass_shell'=>true]);
+ integration_expect(is_resource($process),'synthetic Git capture command must start');
+ fclose($pipes[0]);
+ $stdout=(string)stream_get_contents($pipes[1]);
+ $stderr=(string)stream_get_contents($pipes[2]);
+ fclose($pipes[1]); fclose($pipes[2]);
+ return [proc_close($process),$stdout,$stderr];
 }
 
 function integration_ssh_wire_string(string $value):string{
@@ -266,7 +281,9 @@ integration_expect(strpos($connectionHtml,$expectedConnection)!==false,'actual a
 integration_expect(strpos($connectionHtml,'Host source</b><br>configured')!==false&&strpos($connectionHtml,'Port source</b><br>configured')!==false,'configured SSH endpoint sources must be identified in the role UI');
 integration_expect(strpos($connectionHtml,'value="ssh.example.test"')!==false&&strpos($connectionHtml,'value="2222"')!==false,'the client-side endpoint fields must reflect validated server settings');
 integration_expect(strpos($connectionHtml,'Permission denied (publickey)')!==false&&strpos($connectionHtml,'Load key: Permission denied')!==false,'the role UI must distinguish local key loading from server public-key rejection');
+integration_expect(strpos($connectionHtml,'id="tda-ssh-alias"')!==false&&strpos($connectionHtml,'IdentityFile')!==false,'the role UI must support a saved workstation alias that selects its configured key');
 integration_expect(strpos($connectionHtml,'name="tda-ssh-host"')===false&&strpos($connectionHtml,'name="tda-ssh-port"')===false,'client-only SSH endpoint fields must not submit or persist host overrides');
+integration_expect(strpos($connectionHtml,'name="tda-ssh-alias"')===false,'client-only saved alias field must not submit or persist a workstation setting');
 
 $invalidConnectionEnvironment=$common+[
  'REQUEST_METHOD'=>'GET','SCRIPT_NAME'=>$routes['admin'],'QUERY_STRING'=>'',
@@ -277,7 +294,7 @@ $invalidConnectionEnvironment=$common+[
 [$invalidConnectionHtml]=integration_run_role($root,'admin',$invalidConnectionEnvironment);
 integration_expect(strpos($invalidConnectionHtml,'touch /tmp/unsafe')===false,'invalid configured SSH host must not be reflected into the page or command');
 integration_expect(strpos($invalidConnectionHtml,'ssh -p 2222 '.$account['name'].'@ssh.example.test')===false,'invalid configured SSH host must not create a shell-like connection command');
-integration_expect(strpos($invalidConnectionHtml,'Enter a valid SSH host and port to build the command.')!==false,'invalid configured SSH host must leave the command unavailable');
+integration_expect(strpos($invalidConnectionHtml,'Enter a valid SSH alias, or a valid SSH host and port, to build the command.')!==false,'invalid configured SSH host must leave the command unavailable');
 
 foreach(['reseller','user'] as $role){
  $environment=$common+['REQUEST_METHOD'=>'GET','SCRIPT_NAME'=>$routes[$role],'QUERY_STRING'=>''];
@@ -343,6 +360,91 @@ $stdinEnvironment=$common+[
 ];
 [$html]=integration_run_role($root,'admin',$stdinEnvironment,$body);
 integration_expect_successful_pwd($html,$homeA);
+
+$inspectionHome=$homeA.'/repo-inspection';
+integration_expect(mkdir($inspectionHome,0700,true),'ordinary repository inspection HOME must be created');
+$canary='SYNTHETIC_PORTAL_SECRET_CANARY_'.bin2hex(random_bytes(8));
+integration_expect(file_put_contents($inspectionHome.'/README.md',"repo-safe-marker\nordinary repository fixture\n")!==false,'ordinary repository inspection fixture must be written');
+integration_expect(mkdir($inspectionHome.'/.ssh',0700),'synthetic private-key directory must be created');
+integration_expect(file_put_contents($inspectionHome.'/.ssh/id_rsa',"-----BEGIN RSA PRIVATE KEY-----\n".$canary."\n-----END RSA PRIVATE KEY-----\n")!==false,'synthetic private-key canary fixture must be written');
+integration_expect(link($inspectionHome.'/.ssh/id_rsa',$inspectionHome.'/hardlinked-key'),'synthetic private-key hardlink fixture must be created');
+integration_expect(mkdir($inspectionHome.'/.git',0700),'synthetic Git metadata directory must be created');
+integration_expect(file_put_contents($inspectionHome.'/.git/config',"[remote \\\"origin\\\"]\n url = https://fixture.invalid/$canary\n")!==false,'synthetic Git config canary fixture must be written');
+integration_expect(file_put_contents($inspectionHome.'/.env',"FIXTURE_SECRET=$canary\n")!==false,'synthetic environment config canary fixture must be written');
+integration_expect(file_put_contents($inspectionHome.'/.npmrc',"//registry.fixture.invalid/:_authToken=$canary\n")!==false,'synthetic package config canary fixture must be written');
+$outsideCanaryPath=$fixture.'/outside-home-secret';
+integration_expect(file_put_contents($outsideCanaryPath,"OUTSIDE_HOME_$canary\n")!==false,'outside-HOME synthetic canary fixture must be written');
+integration_expect(symlink($inspectionHome.'/.ssh/id_rsa',$inspectionHome.'/in-home-key-link'),'in-HOME key symlink fixture must be created');
+integration_expect(symlink($outsideCanaryPath,$inspectionHome.'/outside-key-link'),'outside-HOME key symlink fixture must be created');
+$terminalPost=static function(string $command,?string $cwdOverride=null,array $environmentOverrides=[])use($common,$route,$token,$inspectionHome,$root):string{
+ $fields=['csrf'=>$token,'cwd'=>$cwdOverride??$inspectionHome,'command'=>$command,'run'=>'1'];
+ $postBody=http_build_query($fields);
+ $environment=array_replace($common,[
+  'REQUEST_METHOD'=>'POST','SCRIPT_NAME'=>$route,'QUERY_STRING'=>'',
+  'POST'=>$postBody,'CONTENT_LENGTH'=>(string)strlen($postBody)
+ ],$environmentOverrides);
+ [$result]=integration_run_role($root,'admin',$environment);
+ return $result;
+};
+foreach([
+ 'cat on an ordinary repository file'=>'cat README.md',
+ 'grep on an ordinary repository file'=>'grep -F repo-safe-marker README.md',
+ 'head on an ordinary repository file'=>'head -n 1 README.md',
+ 'tail on an ordinary repository file'=>'tail -n 2 README.md'
+] as $case=>$command){
+ integration_expect_terminal_blocked($terminalPost($command),$case.' must not reopen a checked pathname in a child process',$canary);
+}
+$inspectionLink=$inspectionHome.'/repo-link';
+integration_expect(symlink($inspectionHome,$inspectionLink),'in-HOME cwd symlink fixture must be created');
+$linkedCwd=$terminalPost('pwd',$inspectionLink);
+integration_expect_terminal_blocked($linkedCwd,'in-HOME symlink working-directory path',$canary);
+$untrustedToolDirectory=$fixture.'/untrusted-bin';
+integration_expect(mkdir($untrustedToolDirectory,0700),'untrusted PATH fixture directory must be created');
+integration_expect(file_put_contents($untrustedToolDirectory.'/timeout',"#!/bin/sh\nshift\nexec \"\$@\"\n")!==false,'synthetic timeout PATH canary must be written');
+integration_expect(file_put_contents($untrustedToolDirectory.'/cat',"#!/bin/sh\nprintf '%s\\n' 'UNTRUSTED_PATH_CANARY'\n")!==false,'synthetic cat PATH canary must be written');
+chmod($untrustedToolDirectory.'/timeout',0700);chmod($untrustedToolDirectory.'/cat',0700);
+$untrustedPathResult=$terminalPost('pwd',$inspectionHome,['PATH'=>$untrustedToolDirectory]);
+integration_expect(strpos($untrustedPathResult,'Exit code: 0')!==false&&strpos($untrustedPathResult,$inspectionHome)!==false,'terminal execution must use a fixed trusted PATH despite DirectAdmin process environment');
+integration_expect(strpos($untrustedPathResult,'UNTRUSTED_PATH_CANARY')===false,'untrusted PATH executable output must never reach the terminal');
+$secretReadAttempts=[
+ 'cat relative SSH key path'=>'cat .ssh/id_rsa',
+ 'grep filtering a private-key PEM marker'=>'grep -v BEGIN .ssh/id_rsa',
+ 'head on a private-key file'=>'head -n 2 .ssh/id_rsa',
+ 'tail skipping a private-key marker'=>'tail -n +2 .ssh/id_rsa',
+ 'grep pattern-file option on a private-key file'=>'grep -f .ssh/id_rsa README.md',
+ 'dot-prefixed private-key path'=>'cat ./.ssh/id_rsa',
+ 'parent-segment path trick'=>'cat nested/../.ssh/id_rsa',
+ 'Git config path'=>'cat .git/config',
+ 'environment config path'=>'grep -n SYNTHETIC .env',
+ 'package-manager auth config path'=>'head -n 1 .npmrc',
+ 'in-HOME symlink to private-key fixture'=>'grep -v BEGIN in-home-key-link',
+ 'outside-HOME symlink to canary fixture'=>'cat outside-key-link',
+ 'in-HOME hardlink to a synthetic private-key fixture'=>'cat hardlinked-key',
+ 'private-key file passed to PHP lint'=>'php -l .ssh/id_rsa',
+ 'date file-input option targeting a private-key file'=>'date -f .ssh/id_rsa',
+ 'disk diagnostic with a private-key path operand'=>'df -h .ssh/id_rsa',
+ 'working-directory command with a private-key path operand'=>'pwd .ssh/id_rsa',
+ 'recursive listing of a private-key directory'=>'ls -la .ssh',
+ 'package test script execution'=>'npm test',
+ 'Node test script execution'=>'node --test',
+ 'Composer script execution'=>'composer test'
+];
+foreach($secretReadAttempts as $case=>$command){
+ integration_expect_terminal_blocked($terminalPost($command),$case,$canary);
+}
+
+$stdinSecretBody=http_build_query([
+ 'csrf'=>$token,
+ 'cwd'=>$inspectionHome,
+ 'command'=>'grep -v BEGIN .ssh/id_rsa',
+ 'run'=>'1'
+]);
+$stdinSecretEnvironment=$common+[
+ 'REQUEST_METHOD'=>'POST','SCRIPT_NAME'=>$route,'QUERY_STRING'=>'pipe_post=yes',
+ 'POST'=>'stdin=true','CONTENT_LENGTH'=>(string)strlen($stdinSecretBody)
+];
+[$stdinSecretHtml]=integration_run_role($root,'admin',$stdinSecretEnvironment,$stdinSecretBody);
+integration_expect_terminal_blocked($stdinSecretHtml,'stdin-transport private-key read attempt',$canary);
 
 $nulTerminatedBody=$body."\0";
 $nulWithoutLengthEnvironment=$common+[
@@ -506,6 +608,42 @@ integration_expect_transport_rejected($html,'multiple form actions','code=action
 
 $gitRepo=$homeA.'/git-remote-policy';
 integration_init_git_repo($gitRepo,$homeA);
+$filterRepo=$homeA.'/git-process-filter';
+integration_init_git_repo($filterRepo,$homeA);
+$filterMarker=$fixture.'/actual-role-filter-process-marker';
+$filterHelper=$fixture.'/actual-role-filter-process-helper';
+integration_expect(file_put_contents($filterHelper,"#!/bin/sh\nprintf invoked >> ".escapeshellarg($filterMarker)."\nexit 0\n")!==false,'actual-role process-filter helper must be written');
+integration_expect(chmod($filterHelper,0700),'actual-role process-filter helper must be executable');
+$filterEnvironment=[
+ 'PATH'=>getenv('PATH')?:'/usr/local/bin:/usr/bin:/bin',
+ 'HOME'=>$homeA,
+ 'GIT_CONFIG_NOSYSTEM'=>'1',
+ 'GIT_CONFIG_GLOBAL'=>'/dev/null',
+ 'GIT_TERMINAL_PROMPT'=>'0'
+];
+integration_expect(file_put_contents($filterRepo.'/.gitattributes',"*.synthetic filter=synthetic-process\n*.comment-synthetic filter=synthetic-comment\n*.dotted-synthetic filter=synthetic-dotted\n")!==false,'actual-role process-filter attributes must be written');
+integration_expect(file_put_contents($filterRepo.'/process.synthetic',"before\n")!==false,'actual-role process-filter fixture must be written');
+integration_expect(file_put_contents($filterRepo.'/process.comment-synthetic',"before\n")!==false,'actual-role comment-header process-filter fixture must be written');
+integration_expect(file_put_contents($filterRepo.'/process.dotted-synthetic',"before\n")!==false,'actual-role dotted-header process-filter fixture must be written');
+integration_git_command($filterRepo,['add','--','.gitattributes','process.synthetic','process.comment-synthetic','process.dotted-synthetic'],$filterEnvironment);
+integration_git_command($filterRepo,['-c','user.name=DirectAdmin Fixture','-c','user.email=fixture@example.invalid','commit','--quiet','--message','process filter fixture'],$filterEnvironment);
+integration_git_command($filterRepo,['config','filter.synthetic-process.process',$filterHelper],$filterEnvironment);
+integration_expect(file_put_contents($filterRepo.'/.git/config',file_get_contents($filterRepo.'/.git/config')."\n[filter \"synthetic-comment\"] # valid commented filter header\n process = ".$filterHelper."\n[filter.synthetic-dotted] # deprecated dotted filter header\n process = ".$filterHelper."\n")!==false,'actual-role alternate filter headers must be configured');
+integration_expect(file_put_contents($filterRepo.'/process.synthetic',"after\n")!==false,'actual-role process-filter fixture must be changed');
+integration_expect(file_put_contents($filterRepo.'/process.comment-synthetic',"after\n")!==false,'actual-role comment-header process-filter fixture must be changed');
+integration_expect(file_put_contents($filterRepo.'/process.dotted-synthetic',"after\n")!==false,'actual-role dotted-header process-filter fixture must be changed');
+[$unboundedFilterExit,,]=integration_git_capture($filterRepo,['diff','--stat'],$filterEnvironment);
+integration_expect(is_file($filterMarker),'unbounded fixture Git diff must execute the synthetic process filter');
+if(is_file($filterMarker)) integration_expect(unlink($filterMarker),'actual-role process-filter marker must be reset before role execution');
+$filterFields=['csrf'=>$token,'cwd'=>$filterRepo,'command'=>'git diff --stat','run'=>'1'];
+$filterBody=http_build_query($filterFields,'','&',PHP_QUERY_RFC1738);
+$filterRoleEnvironment=$common+[
+ 'REQUEST_METHOD'=>'POST','SCRIPT_NAME'=>$route,'QUERY_STRING'=>'pipe_post=yes',
+ 'POST'=>'stdin=true','CONTENT_LENGTH'=>(string)strlen($filterBody)
+];
+[$filterRoleHtml]=integration_run_role($root,'admin',$filterRoleEnvironment,$filterBody);
+integration_expect(strpos($filterRoleHtml,'Git inspection is unavailable')!==false,'actual admin role Git diff must fail closed while repository configuration isolation is pending');
+integration_expect(!is_file($filterMarker),'actual admin role Git diff must not execute the repository-configured process filter');
 $remoteUrl='https://synthetic-user:synthetic-token@example.invalid/repo.git';
 $gitConfig=$gitRepo.'/.git/config';
 $gitConfigBefore=hash_file('sha256',$gitConfig);
@@ -615,6 +753,75 @@ foreach($keyTransportCases as $caseName=>$case){
  [$keyResult]=integration_run_role($root,'admin',$keyEnvironment,$stdinBody);
  integration_expect_successful_key($keyResult,$case['key'],$keyHome);
 }
+
+$lifecycleHome=$fixture.'/key-lifecycle';
+integration_expect(mkdir($lifecycleHome,0700,true),'isolated key-lifecycle HOME must be created');
+$lifecycleSsh=$lifecycleHome.'/.ssh';
+integration_expect(mkdir($lifecycleSsh,0700),'isolated key-lifecycle .ssh directory must be created');
+$lifecycleAuthorized=$lifecycleSsh.'/authorized_keys';
+$lifecycleEd=explode(' ',integration_synthetic_public_key('ssh-ed25519'),3);
+$lifecycleRsa=explode(' ',integration_synthetic_public_key('ssh-rsa'),3);
+$lifecycleEdMaterial=$lifecycleEd[0].' '.$lifecycleEd[1];
+$lifecycleRsaMaterial=$lifecycleRsa[0].' '.$lifecycleRsa[1];
+$lifecycleEdBlob=base64_decode($lifecycleEd[1],true);
+integration_expect(is_string($lifecycleEdBlob),'synthetic lifecycle key blob must decode');
+$lifecycleFingerprint='SHA256:'.rtrim(base64_encode(hash('sha256',$lifecycleEdBlob,true)),'=');
+$lifecycleOriginal='command="echo hello world",no-pty '.$lifecycleEdMaterial.' ' ."Alice's \"laptop";
+integration_expect(file_put_contents($lifecycleAuthorized,$lifecycleOriginal)!==false,'no-terminal-LF authorized_keys fixture must be seeded');
+chmod($lifecycleAuthorized,0600);
+$lifecycleGet=array_replace($common,['REQUEST_METHOD'=>'GET','SCRIPT_NAME'=>$route,'QUERY_STRING'=>'','HOME'=>$lifecycleHome]);
+[$lifecyclePage]=integration_run_role($root,'admin',$lifecycleGet);
+$lifecycleToken=integration_token($lifecyclePage);
+integration_expect(strpos($lifecyclePage,'name="expected_fingerprint" value="'.$lifecycleFingerprint.'"')!==false,'rendered revoke form must bind the displayed row to its SHA-256 fingerprint');
+$lifecyclePost=static function(array $fields)use($common,$route,$lifecycleHome,$root):string{
+ $body=http_build_query($fields,'','&',PHP_QUERY_RFC1738);
+ $environment=array_replace($common,['REQUEST_METHOD'=>'POST','SCRIPT_NAME'=>$route,'QUERY_STRING'=>'','POST'=>$body,'CONTENT_LENGTH'=>(string)strlen($body),'HOME'=>$lifecycleHome]);
+ [$html]=integration_run_role($root,'admin',$environment);
+ return $html;
+};
+$duplicateAdd=$lifecyclePost(['csrf'=>$lifecycleToken,'public_key'=>$lifecycleEdMaterial.' normal-comment','add_key'=>'1']);
+integration_expect(strpos($duplicateAdd,'Key already installed.')!==false,'actual admin role must deduplicate restricted key material despite apostrophe and unmatched quote bytes in its comment');
+integration_expect(file_get_contents($lifecycleAuthorized)===$lifecycleOriginal,'duplicate-key form must leave the no-final-LF existing line unchanged');
+$distinctAdd=$lifecyclePost(['csrf'=>$lifecycleToken,'public_key'=>$lifecycleRsaMaterial.' rsa-comment','add_key'=>'1']);
+integration_expect(strpos($distinctAdd,'Public key installed.')!==false,'actual admin role must report a successful checked atomic write');
+integration_expect(file_get_contents($lifecycleAuthorized)===$lifecycleOriginal."\n".$lifecycleRsaMaterial." rsa-comment\n",'actual role append must separate an unterminated prior line with LF');
+integration_expect((fileperms($lifecycleAuthorized)&0777)===0600&&fileowner($lifecycleAuthorized)===posix_geteuid(),'actual role key lifecycle must retain the account owner and mode 0600');
+$commentedLifecycleEd='# '.$lifecycleEdMaterial.' commented-out-key';
+$duplicateRecords=$commentedLifecycleEd."\n".$lifecycleRsaMaterial.' rsa-comment' ."\n".'command="echo hello world",no-pty '.$lifecycleEdMaterial.' ' ."Alice's \"laptop\n".$lifecycleEdMaterial.' trailing-backslash\\' ."\n";
+integration_expect(file_put_contents($lifecycleAuthorized,$duplicateRecords)!==false,'actual role duplicate, comment-only and reordered-key fixture must be seeded');
+chmod($lifecycleAuthorized,0600);
+$staleRemove=$lifecyclePost(['csrf'=>$lifecycleToken,'remove_key'=>'0','expected_fingerprint'=>$lifecycleFingerprint]);
+integration_expect(strpos($staleRemove,'Key list changed; reload before revoking.')!==false,'stale form from another client must be rejected when a different key moves into its old row');
+integration_expect(file_get_contents($lifecycleAuthorized)===$duplicateRecords,'stale revoke from one client must leave the reordered account key list unchanged');
+$reorderedGet=array_replace($common,['REQUEST_METHOD'=>'GET','SCRIPT_NAME'=>$route,'QUERY_STRING'=>'','HOME'=>$lifecycleHome]);
+[$reorderedPage]=integration_run_role($root,'admin',$reorderedGet);
+integration_expect(strpos($reorderedPage,'name="expected_fingerprint" value="'.$lifecycleFingerprint.'"><button name="remove_key" value="1">Revoke</button>')!==false,'refreshed form must pair the shifted Ed25519 row with its current displayed fingerprint');
+$duplicateRemove=$lifecyclePost(['csrf'=>$lifecycleToken,'remove_key'=>'1','expected_fingerprint'=>$lifecycleFingerprint]);
+integration_expect(strpos($duplicateRemove,'Key revoked.')!==false,'actual admin role must report successful fingerprint-bound revocation');
+integration_expect(file_get_contents($lifecycleAuthorized)===$commentedLifecycleEd."\n".$lifecycleRsaMaterial." rsa-comment\n",'actual role revocation must remove every active duplicate despite odd comments and preserve commented-out and unrelated key lines');
+$commentHome=$fixture.'/key-commented-out';
+integration_expect(mkdir($commentHome,0700,true),'comment-only actual-role HOME must be created');
+integration_expect(mkdir($commentHome.'/.ssh',0700),'comment-only actual-role .ssh directory must be created');
+$commentAuthorized=$commentHome.'/.ssh/authorized_keys';
+integration_expect(file_put_contents($commentAuthorized,$commentedLifecycleEd."\n")!==false,'actual-role commented-out key fixture must be written');
+chmod($commentAuthorized,0600);
+$commentGet=array_replace($common,['REQUEST_METHOD'=>'GET','SCRIPT_NAME'=>$route,'QUERY_STRING'=>'','HOME'=>$commentHome]);
+[$commentPage]=integration_run_role($root,'admin',$commentGet);
+$commentToken=integration_token($commentPage);
+$commentPostBody=http_build_query(['csrf'=>$commentToken,'public_key'=>$lifecycleEdMaterial.' real-key','add_key'=>'1'],'','&',PHP_QUERY_RFC1738);
+$commentPostEnvironment=array_replace($common,['REQUEST_METHOD'=>'POST','SCRIPT_NAME'=>$route,'QUERY_STRING'=>'','POST'=>$commentPostBody,'CONTENT_LENGTH'=>(string)strlen($commentPostBody),'HOME'=>$commentHome]);
+[$commentPostResult]=integration_run_role($root,'admin',$commentPostEnvironment);
+integration_expect(strpos($commentPostResult,'Public key installed.')!==false,'actual admin role must install matching key material when it appears only in a comment line');
+integration_expect(file_get_contents($commentAuthorized)===$commentedLifecycleEd."\n".$lifecycleEdMaterial." real-key\n",'actual role key addition must preserve comment-only lines while adding the active key');
+$outsideKeyFile=$fixture.'/outside-authorized-keys';
+integration_expect(file_put_contents($outsideKeyFile,'sentinel-do-not-change')!==false,'actual role outside-key sentinel must be created');
+integration_expect(unlink($lifecycleAuthorized)&&symlink($outsideKeyFile,$lifecycleAuthorized),'actual role unsafe authorized_keys symlink fixture must be created');
+$unsafeWrite=$lifecyclePost(['csrf'=>$lifecycleToken,'public_key'=>$lifecycleEdMaterial.' rejected-symlink','add_key'=>'1']);
+integration_expect(strpos($unsafeWrite,'Unable to update authorized_keys safely.')!==false,'actual admin role must report an unsafe-path write failure accurately');
+integration_expect(strpos($unsafeWrite,'Public key installed.')===false,'unsafe authorized_keys path must never be reported as a successful install');
+integration_expect(file_get_contents($outsideKeyFile)==='sentinel-do-not-change','actual role must not write through an authorized_keys symlink');
+integration_expect(strpos($unsafeWrite,'Public-key management unavailable')!==false,'unsafe key storage must render a safe recovery message instead of a PHP error');
+integration_expect(unlink($lifecycleAuthorized),'actual role symlink fixture must be removed from isolated HOME');
 
 function integration_expect_invalid_key(string $html,string $home,string $case):void{
  integration_expect(strpos($html,'Invalid public key format.')!==false,$case.' must be rejected as an invalid key line');

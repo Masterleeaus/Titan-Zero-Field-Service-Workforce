@@ -23,10 +23,11 @@ function element(value = '') {
   };
 }
 
-function createPage({ host = 'ssh.example.test', port = '22', username = 'admin' } = {}) {
+function createPage({ host = 'ssh.example.test', port = '22', username = 'admin', alias = '' } = {}) {
   const elements = new Map([
     ['tda-ssh-host', element(host)],
     ['tda-ssh-port', element(port)],
+    ['tda-ssh-alias', element(alias)],
     ['tda-ssh-username', element(username)],
     ['tda-ssh-command', element()],
     ['tda-ssh-copy', element()],
@@ -53,7 +54,7 @@ test('builds a client-only SSH command from the endpoint and fixed DirectAdmin u
   page.elements.get('tda-ssh-host').value = 'ssh.example.test; whoami';
   page.elements.get('tda-ssh-host').dispatch('input');
   assert.equal(page.elements.get('tda-ssh-copy').disabled, true);
-  assert.equal(page.elements.get('tda-ssh-command').textContent, 'Enter a valid SSH host and port to build the command.');
+  assert.equal(page.elements.get('tda-ssh-command').textContent, 'Enter a valid SSH alias, or a valid SSH host and port, to build the command.');
 
   page.elements.get('tda-ssh-host').value = 'ssh.example.test';
   page.elements.get('tda-ssh-host').dispatch('input');
@@ -61,9 +62,19 @@ test('builds a client-only SSH command from the endpoint and fixed DirectAdmin u
   page.elements.get('tda-ssh-port').dispatch('input');
   assert.equal(page.elements.get('tda-ssh-copy').disabled, true);
 
+  const aliasInput = page.elements.get('tda-ssh-alias');
+  aliasInput.value = 'titan';
+  aliasInput.dispatch('input');
+  assert.equal(page.elements.get('tda-ssh-command').textContent, 'ssh titan');
+  assert.equal(page.elements.get('tda-ssh-copy').disabled, false);
+  aliasInput.value = 'titan; whoami';
+  aliasInput.dispatch('input');
+  assert.equal(page.elements.get('tda-ssh-copy').disabled, true);
+  assert.equal(page.elements.get('tda-ssh-command').textContent, 'Enter a valid SSH alias, or a valid SSH host and port, to build the command.');
+
   const optionUserPage = createPage({ username: '-oProxyCommand' });
   assert.equal(optionUserPage.elements.get('tda-ssh-copy').disabled, true);
-  assert.equal(optionUserPage.elements.get('tda-ssh-command').textContent, 'Enter a valid SSH host and port to build the command.');
+  assert.equal(optionUserPage.elements.get('tda-ssh-command').textContent, 'Enter a valid SSH alias, or a valid SSH host and port, to build the command.');
   assert.equal(page.fetchCalls(), 0);
 });
 
@@ -78,9 +89,15 @@ test('distinguishes a local Windows key-file permission error from server key re
   assert.match(guidance.textContent, /Local key-file access failed before server authentication/);
   assert.doesNotMatch(guidance.textContent, /C:\\Users/);
 
+  input.value = 'no such identity: C:\\Users\\admin\\.ssh\\wrong_key: No such file or directory';
+  diagnose.dispatch('click');
+  assert.match(guidance.textContent, /could not find the configured identity file locally/);
+  assert.doesNotMatch(guidance.textContent, /C:\\Users/);
+
   input.value = 'admin@ssh.example.test: Permission denied (publickey).';
   diagnose.dispatch('click');
   assert.match(guidance.textContent, /SSH server was reached/);
+  assert.match(guidance.textContent, /expected key may not have been selected/);
   assert.doesNotMatch(guidance.textContent, /Permission denied \(publickey\)/);
   assert.equal(page.fetchCalls(), 0);
 });

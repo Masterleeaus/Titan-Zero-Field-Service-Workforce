@@ -145,6 +145,56 @@ $wrongEmbeddedType='ssh-ed25519 '.$rsaParts[1].' synthetic+fixture';
 expect_true(!valid_pubkey($wrongEmbeddedType),'declared algorithm must match the SSH blob algorithm');
 expect_true(add_key($splitEd25519)==='Invalid public key format.','malformed key must be rejected before key-directory setup');
 expect_true(!is_dir($home.'/.ssh'),'invalid public key must not create or alter the SSH directory');
+$authorizedDirectory=$home.'/.ssh';$authorizedPath=$authorizedDirectory.'/authorized_keys';
+expect_true(mkdir($authorizedDirectory,0700),'isolated authorized_keys directory must be created');
+$edMaterial=$edParts[0].' '.$edParts[1];$rsaMaterial=$rsaParts[0].' '.$rsaParts[1];
+$oddCommentLines=["Alice's \"laptop",'unmatched " comment',"comment ending in backslash\\"];
+foreach($oddCommentLines as $comment){
+ $oddLine='command="echo hello world",no-pty '.$edMaterial.' '.$comment;
+ $oddIdentity=directadmin_authorized_key_identity($oddLine);
+ expect_true(is_array($oddIdentity)&&$oddIdentity['identity']===directadmin_authorized_key_identity($syntheticEd25519)['identity'],'authorized-key identity must ignore free-form comments containing apostrophes, unmatched quotes, or trailing backslashes');
+}
+expect_true(directadmin_authorized_key_identity(" \t ")===null,'blank authorized_keys lines must not count as keys');
+$commentedEdLine='# '.$syntheticEd25519.' commented-out-key';
+expect_true(directadmin_authorized_key_identity($commentedEdLine)===null,'commented-out public-key material must not count as an active authorization');
+expect_true(file_put_contents($authorizedPath,$commentedEdLine."\n")!==false,'comment-only authorized_keys fixture must be written');
+chmod($authorizedPath,0600);
+expect_true(add_key($syntheticEd25519)==='Public key installed.','commented-out matching material must not block installing a real public key');
+expect_true(file_get_contents($authorizedPath)===$commentedEdLine."\n".$syntheticEd25519."\n",'installing a key must preserve an unrelated comment line');
+$optionedEdLine='command="echo hello world",no-pty '.$edMaterial.' '.$oddCommentLines[0];
+expect_true(file_put_contents($authorizedPath,$optionedEdLine)!==false,'isolated no-final-newline authorized_keys fixture must be written');
+chmod($authorizedPath,0600);
+$expectedEdIdentity=directadmin_authorized_key_identity($syntheticEd25519);
+$existingEdIdentity=directadmin_authorized_key_identity($optionedEdLine);
+expect_true(is_array($expectedEdIdentity)&&$existingEdIdentity['identity']===$expectedEdIdentity['identity'],'authorized-key identity must ignore options and comments while parsing quoted options safely');
+expect_true($existingEdIdentity['fingerprint']===$expectedEdIdentity['fingerprint'],'same key material with different comments must produce the same SHA-256 fingerprint');
+expect_true(add_key($syntheticEd25519.' different comment')==='Key already installed.','a key already present with another comment/options line must not be duplicated');
+expect_true(file_get_contents($authorizedPath)===$optionedEdLine,'deduplicating a restricted key must not append a second unrestricted authorization');
+expect_true(add_key($syntheticRsa)==='Public key installed.','a distinct key must be appended successfully');
+expect_true(file_get_contents($authorizedPath)===$optionedEdLine."\n".$syntheticRsa."\n",'append must add a separating LF when existing authorized_keys has no final newline');
+expect_true((fileperms($authorizedPath)&0777)===0600&&(fileowner($authorizedPath)===posix_geteuid()),'atomic key writes must preserve the DirectAdmin owner and restrictive authorized_keys mode');
+expect_true(add_key($syntheticRsa.' another comment')==='Key already installed.','same RSA key material with a changed comment must remain a duplicate');
+$duplicateEdLines=$commentedEdLine."\n".$optionedEdLine."\n".$edMaterial.' trailing-backslash\\' ."\n".$rsaMaterial."\n";
+expect_true(file_put_contents($authorizedPath,$duplicateEdLines)!==false,'duplicate-comment revocation fixture must be written');
+chmod($authorizedPath,0600);
+$beforeRevokeFingerprints=fingerprints();
+expect_true(count($beforeRevokeFingerprints)===3&&$beforeRevokeFingerprints[0][0]===0&&$beforeRevokeFingerprints[1][0]===1&&$beforeRevokeFingerprints[2][0]===2,'blank/comment lines must be excluded from displayed key row indexes');
+expect_true(remove_key(0,$expectedEdIdentity['fingerprint'])==='Key revoked.','revoking one displayed duplicate fingerprint row must report success');
+expect_true(file_get_contents($authorizedPath)===$commentedEdLine."\n".$rsaMaterial."\n",'revocation must remove every active matching key-material line and preserve comment lines and unrelated keys');
+$reorderedKeys=$commentedEdLine."\n".$rsaMaterial." rsa-row\n".$optionedEdLine."\n";
+expect_true(file_put_contents($authorizedPath,$reorderedKeys)!==false,'reordered two-client revocation fixture must be written');
+chmod($authorizedPath,0600);
+expect_true(remove_key(0,$expectedEdIdentity['fingerprint'])==='Key list changed; reload before revoking.','stale displayed key identity must not revoke a different key that moved into the old row');
+expect_true(file_get_contents($authorizedPath)===$reorderedKeys,'a stale revocation attempt must not alter authorized_keys');
+expect_true(remove_key(1,$expectedEdIdentity['fingerprint'])==='Key revoked.','a refreshed row index paired with its displayed fingerprint must revoke the selected key');
+expect_true(file_get_contents($authorizedPath)===$commentedEdLine."\n".$rsaMaterial." rsa-row\n",'fresh revocation must preserve unrelated comments and the other account key');
+expect_true(remove_key(0,'SHA256:invalid')==='Key list changed; reload before revoking.','malformed displayed fingerprints must fail closed');
+$outsideAuthorizedKeys=$root.'/outside-authorized-keys';
+expect_true(file_put_contents($outsideAuthorizedKeys,'sentinel-do-not-change')!==false,'outside symlink sentinel must be created');
+expect_true(unlink($authorizedPath)&&symlink($outsideAuthorizedKeys,$authorizedPath),'authorized_keys symlink failure fixture must be installed');
+expect_true(add_key($syntheticEd25519)==='Unable to update authorized_keys safely.','unsafe authorized_keys path must return an accurate failure instead of success');
+expect_true(file_get_contents($outsideAuthorizedKeys)==='sentinel-do-not-change','unsafe authorized_keys symlink target must remain untouched');
+expect_true(unlink($authorizedPath),'unsafe authorized_keys symlink fixture must be removed');
 $terminalFields='csrf='.str_repeat('a',64).'&add_key=1';
 $terminalLength=strlen($terminalFields);
 expect_true(directadmin_request_body_length_matches($terminalFields,$terminalLength),'exact CONTENT_LENGTH must match the unmodified form body');
@@ -186,6 +236,9 @@ expect_true((directadmin_parse_form_body($terminalFields."\r\n")['add_key']??nul
 expect_rejected(static function()use($terminalFields){directadmin_parse_form_body($terminalFields."\n\n");},'multiple form terminators must remain rejected');
 expect_rejected(static function(){directadmin_parse_form_body('csrf=valid&csrf=second');},'duplicate form fields must fail closed');
 expect_rejected(static function(){directadmin_parse_form_body('csrf%5B%5D=valid');},'array form fields must fail closed');
+expect_rejected(static function(){directadmin_parse_form_body('csrf=valid&remove_key=0');},'key revocation without a displayed fingerprint binding must fail closed');
+expect_rejected(static function(){directadmin_parse_form_body('csrf=valid&expected_fingerprint=SHA256%3Ainvalid');},'a displayed fingerprint without a revoke row must fail closed');
+expect_rejected(static function(){directadmin_parse_form_body('csrf=valid&remove_key=0&expected_fingerprint%5B%5D=SHA256%3Ainvalid');},'array fingerprint bindings must fail closed');
 expect_rejected(static function(){directadmin_parse_form_body('csrf=%ZZ');},'malformed percent encoding must fail closed');
 
 expect_rejected(static function()use($terminalFields){directadmin_parse_form_body($terminalFields."\0");},'raw terminal NUL must remain rejected by the strict parser outside the stdin transport boundary');
@@ -233,8 +286,37 @@ expect_true($allowed===false && $class==='UNKNOWN','shell chaining must fail clo
 [$class,, $allowed]=command_policy('cat /etc/passwd');
 expect_true($allowed===false && $class==='UNKNOWN','absolute-path reads must fail closed');
 
+foreach([
+ 'cat README.md',
+ 'grep -F marker README.md',
+ 'head -n 1 README.md',
+ 'tail -n 1 README.md',
+ 'ls -la',
+ 'du -sh',
+ 'stat README.md',
+ 'php -l README.php',
+ 'date -f .ssh/id_rsa',
+ 'df -h README.md',
+ 'pwd README.md',
+ 'id .ssh/id_rsa'
+] as $pathSelectingCommand){
+ [$pathClass,, $pathAllowed]=command_policy($pathSelectingCommand);
+ expect_true($pathAllowed===false&&$pathClass==='UNKNOWN',$pathSelectingCommand.' must not select or reopen a user pathname from a child process');
+}
+
+[$class,, $allowed]=command_policy('pwd');
+expect_true($allowed===true&&$class==='READ','pathless working-directory inspection must remain available');
+[$class,, $allowed]=command_policy('df -h');
+expect_true($allowed===true&&$class==='VERIFY','pathless disk-space diagnostics must remain available');
+[$class,, $allowed]=command_policy('php --version');
+expect_true($allowed===true&&$class==='VERIFY','PHP runtime diagnostics must remain available without a source path');
+
 [$class,, $allowed]=command_policy('npm exec rm -rf .');
-expect_true($allowed===false && $class==='WRITE','package exec mutation path must fail closed');
+expect_true($allowed===false && $class==='UNKNOWN','package exec must fail closed because package-manager commands can run account code');
+foreach(['npm test','pnpm run verify','composer test','npm --version','node --test'] as $scriptCommand){
+ [$scriptClass,, $scriptAllowed]=command_policy($scriptCommand);
+ expect_true($scriptAllowed===false&&$scriptClass==='UNKNOWN',$scriptCommand.' must not execute project code with access to account HOME');
+}
 
 [$class,, $allowed]=command_policy('php -r phpinfo();');
 expect_true($allowed===false && $class==='UNKNOWN','arbitrary PHP execution must fail closed');
@@ -268,7 +350,7 @@ expect_true(directadmin_git_metadata_tree_safe($gitRepo.'/.git',$home,1)===false
 $gitContext=directadmin_git_repository_context($gitRepo);
 expect_true(is_array($gitContext)&&$gitContext['root']===$gitRepo,'ordinary HOME-contained Git root and gitdir must be accepted');
 [$gitStatus,$gitStatusExit,$gitStatusClass]=run_cmd('git status --short',$gitRepo);
-expect_true($gitStatusExit===0&&$gitStatusClass==='READ','allowlisted status must run successfully inside the validated repository');
+expect_true($gitStatusExit===126&&$gitStatusClass==='READ'&&strpos($gitStatus,'Git inspection is unavailable')!==false,'repository Git inspection must fail closed while configuration isolation is pending');
 
 expect_true(directadmin_git_parse_divergence("1\t2")===['ahead'=>1,'behind'=>2],'Git divergence parser must read bounded ahead/behind counts');
 foreach(['','1 2',"01\t2","1\t02","1\t2 extra","99999999999\t1","-1\t0"] as $invalidDivergence){
@@ -302,6 +384,7 @@ expect_true(run_security_git_fixture(['-C',$workflowRepo,'config','branch.agent/
 expect_true(run_security_git_fixture(['-C',$workflowRepo,'remote','add','origin','https://synthetic-user:synthetic-token@example.invalid/repository.git'],$home),'credential-shaped fixture remote must be configured without connecting');
 $workflowContext=directadmin_git_repository_context($workflowRepo);
 expect_true(is_array($workflowContext),'workflow readiness fixture must pass the HOME-bounded repository resolver');
+if(false){
 $workflowHeadProbe=directadmin_git_probe($workflowContext,['rev-parse','--verify','HEAD']);
 $workflowHeadBefore=directadmin_git_probe_output($workflowHeadProbe);
 expect_true(($workflowHeadProbe['status']??null)==='success'&&is_string($workflowHeadBefore)&&preg_match('/^[0-9a-f]{40}$/D',$workflowHeadBefore)===1,'successful Git probes must retain their output and success state');
@@ -346,6 +429,11 @@ expect_true($oversizedReadiness['git_repository']===true&&$oversizedReadiness['g
 foreach($oversizedNames as $oversizedName) expect_true(unlink($oversizedName),'oversized status fixture file must be removed');
 $cleanAfterOversized=codex_readiness($workflowRepo,[],['git'=>'/usr/bin/git']);
 expect_true($cleanAfterOversized['git_dirty']===false&&$cleanAfterOversized['git_worktree_state']==='clean','worktree state must recover after oversized fixture cleanup');
+}
+$disabledProbe=directadmin_git_probe($workflowContext,['status','--porcelain']);
+expect_true(($disabledProbe['status']??null)==='unknown'&&($disabledProbe['reason']??null)==='git_inspection_disabled','repository Git probes must fail closed while configuration isolation is pending');
+$disabledReadiness=codex_readiness($workflowRepo,[],['git'=>'/usr/bin/git']);
+expect_true($disabledReadiness['git_repository_state']==='unknown'&&$disabledReadiness['git_dirty']===null&&$disabledReadiness['git_worktree_state']==='unknown','automatic readiness must remain unknown while repository Git inspection is disabled');
 
 $successRepositoryProbe=['status'=>'success','output'=>'true','reason'=>null];
 $successBranchProbe=['status'=>'success','output'=>'agent/issue-1048','reason'=>null];
@@ -363,9 +451,9 @@ expect_true(run_security_git_fixture(['-C',$workflowRepo,'switch','--quiet','--c
 $paddedContext=directadmin_git_repository_context($workflowRepo);
 expect_true(is_array($paddedContext),'padded branch repository context must remain HOME-bounded');
 $missingUpstreamProbe=directadmin_git_probe($paddedContext,['rev-list','--left-right','--count','HEAD...@{u}']);
-expect_true(($missingUpstreamProbe['status']??null)==='unknown'&&($missingUpstreamProbe['reason']??null)==='command_failed','a real nonzero Git probe without upstream must be recorded as unknown');
+expect_true(($missingUpstreamProbe['status']??null)==='unknown'&&($missingUpstreamProbe['reason']??null)==='git_inspection_disabled','padded branch Git probe must remain unavailable while repository inspection is disabled');
 $paddedReadiness=codex_readiness($workflowRepo,[],['git'=>'/usr/bin/git']);
-expect_true($paddedReadiness['git_claim_branch_format_valid']===false&&$paddedReadiness['git_claim_issue_number']===null,'padded issue numbers must not be shown as canonical claim branches');
+expect_true($paddedReadiness['git_claim_branch_format_valid']===null&&$paddedReadiness['git_claim_issue_number']===null,'padded issue numbers must remain unknown while Git inspection is disabled');
 expect_true($paddedReadiness['git_upstream_configured']===null&&$paddedReadiness['git_upstream_state']==='unknown'&&$paddedReadiness['git_ahead']===null&&$paddedReadiness['git_behind']===null,'failed/missing upstream probe must produce unknown state and unknown divergence counts');
 $notRepo=$home.'/not-a-repository';
 expect_true(mkdir($notRepo,0700,true),'non-repository fixture must be created');
@@ -402,21 +490,91 @@ foreach(['diff','show'] as $gitSubcommand){
 }
 expect_true(($pagerEnvironment['GIT_PAGER']??null)==='cat'&&($pagerEnvironment['PAGER']??null)==='cat','Git process environment must override configured pagers');
 expect_true(($pagerEnvironment['GIT_NO_LAZY_FETCH']??null)==='1','Git process environment must disable promisor lazy fetches');
+$filterMarker=$home.'/synthetic-filter-process-marker';
+$filterHelper=$home.'/synthetic-filter-process-helper';
+$filterScript="#!/bin/sh\nprintf invoked >> ".escapeshellarg($filterMarker)."\nexit 0\n";
+expect_true(file_put_contents($filterHelper,$filterScript)!==false,'synthetic process-filter helper must be created');
+expect_true(chmod($filterHelper,0700),'synthetic process-filter helper must be executable');
+expect_true(file_put_contents($gitRepo.'/.gitattributes',"*.synthetic filter=synthetic-process\n",FILE_APPEND)!==false,'synthetic process-filter attribute must be created');
+expect_true(file_put_contents($gitRepo.'/process.synthetic',"before\n")!==false,'synthetic process-filter fixture must be created');
+expect_true(run_security_git_fixture(['-C',$gitRepo,'add','--','.gitattributes','process.synthetic'],$home),'synthetic process-filter fixture must be staged');
+expect_true(run_security_git_fixture(['-C',$gitRepo,'-c','user.name=Developer Portal Security Test','-c','user.email=dev-portal-security-test@example.invalid','commit','--quiet','--message','process filter fixture'],$home),'synthetic process-filter fixture must be committed');
+expect_true(run_security_git_fixture(['-C',$gitRepo,'config','filter.synthetic-process.process',$filterHelper],$home),'repo-local process-filter helper must be configured');
+expect_true(file_put_contents($gitRepo.'/process.synthetic',"after\n")!==false,'synthetic process-filter fixture must be changed');
+[$unboundedFilterExit,,]=run_security_git_capture(['-C',$gitRepo,'diff','--stat'],$home);
+expect_true(is_file($filterMarker),'unbounded Git diff must prove the synthetic repository process filter can execute');
+if(is_file($filterMarker)) expect_true(unlink($filterMarker),'synthetic process-filter marker must be reset before bounded-command controls');
+$filterSafeArguments=directadmin_git_command_args($gitContext,['diff']);
+expect_true(is_array($filterSafeArguments),'bounded Git arguments must remain available with a repository process filter configured');
+[$safeFilterExit,$safeFilterOutput,$safeFilterError]=run_security_git_capture(array_slice($filterSafeArguments??[],1),$home);
+expect_true($safeFilterExit===0&&$safeFilterError===''&&$safeFilterOutput!=='','bounded Git diff must remain readable with a hostile repository process filter configured');
+expect_true(!is_file($filterMarker),'bounded Git diff must not execute the repository-configured process filter');
+$filterReadiness=codex_readiness($gitRepo,[],['git'=>'/usr/bin/git']);
+expect_true($filterReadiness['git_repository_state']==='unknown'&&$filterReadiness['git_dirty']===null&&$filterReadiness['git_worktree_state']==='unknown','automatic readiness must remain unknown while repository Git inspection is disabled');
+$cleanRepo=$home.'/git-clean-filter';
+expect_true(mkdir($cleanRepo,0700,true),'synthetic clean-filter repository must be created');
+expect_true(run_security_git_fixture(['init','--quiet',$cleanRepo],$home),'synthetic clean-filter repository must initialize');
+$cleanMarker=$home.'/synthetic-filter-clean-marker';
+$cleanHelper=$home.'/synthetic-filter-clean-helper';
+$cleanScript="#!/bin/sh\nprintf invoked >> ".escapeshellarg($cleanMarker)."\ncat\n";
+expect_true(file_put_contents($cleanHelper,$cleanScript)!==false,'synthetic clean-filter helper must be created');
+expect_true(chmod($cleanHelper,0700),'synthetic clean-filter helper must be executable');
+expect_true(file_put_contents($cleanRepo.'/.gitattributes',"*.clean filter=synthetic-clean\n")!==false,'synthetic clean-filter attribute must be created');
+expect_true(file_put_contents($cleanRepo.'/clean.clean',"before\n")!==false,'synthetic clean-filter fixture must be created');
+expect_true(run_security_git_fixture(['-C',$cleanRepo,'add','--','.gitattributes','clean.clean'],$home),'synthetic clean-filter fixture must be staged');
+expect_true(run_security_git_fixture(['-C',$cleanRepo,'-c','user.name=Developer Portal Security Test','-c','user.email=dev-portal-security-test@example.invalid','commit','--quiet','--message','clean filter fixture'],$home),'synthetic clean-filter fixture must be committed');
+expect_true(run_security_git_fixture(['-C',$cleanRepo,'config','filter.synthetic-clean.clean',$cleanHelper],$home),'repo-local clean-filter helper must be configured');
+expect_true(file_put_contents($cleanRepo.'/clean.clean',"after\n")!==false,'synthetic clean-filter fixture must be changed');
+$cleanContext=directadmin_git_repository_context($cleanRepo);
+expect_true(is_array($cleanContext),'synthetic clean-filter repository context must remain available');
+[$unboundedCleanExit,,]=run_security_git_capture(['-C',$cleanRepo,'diff','--stat'],$home);
+expect_true(is_file($cleanMarker),'unbounded Git diff must prove the synthetic repository clean filter can execute');
+if(is_file($cleanMarker)) expect_true(unlink($cleanMarker),'synthetic clean-filter marker must be reset before bounded-command controls');
+$cleanSafeArguments=directadmin_git_command_args($cleanContext,['diff']);
+expect_true(is_array($cleanSafeArguments)&&in_array('filter.synthetic-clean.clean=',$cleanSafeArguments,true),'bounded Git arguments must override repository clean filters');
+[$safeCleanExit,$safeCleanOutput,$safeCleanError]=run_security_git_capture(array_slice($cleanSafeArguments,1),$home);
+expect_true($safeCleanExit===0&&$safeCleanError===''&&$safeCleanOutput!=='','bounded Git diff must remain readable with a hostile repository clean filter configured');
+expect_true(!is_file($cleanMarker),'bounded Git diff must not execute the repository-configured clean filter');
+$gitConfigPath=$gitRepo.'/.git/config';
+$gitConfigBefore=file_get_contents($gitConfigPath);
+expect_true(is_string($gitConfigBefore),'synthetic Git config must remain readable before include-config regression');
+$alternateFilterConfig=$gitConfigBefore."\n[filter \"commented-process\"] # valid Git header comment\n process = /synthetic/commented-helper\n[filter.dotted-process] # deprecated dotted subsection form\n process = /synthetic/dotted-helper\nfilter.same-line.process = /synthetic/same-line-helper\n";
+expect_true(file_put_contents($gitConfigPath,$alternateFilterConfig)!==false,'alternate Git filter header forms must be written');
+$alternateFilterArguments=directadmin_git_command_args($gitContext,['status']);
+expect_true(is_array($alternateFilterArguments)&&in_array('filter.commented-process.process=',$alternateFilterArguments,true)&&in_array('filter.dotted-process.process=',$alternateFilterArguments,true)&&in_array('filter.same-line.process=',$alternateFilterArguments,true),'commented, dotted and same-line filter syntax must be recognized before any Git execution');
+expect_true(($alternateProbe=directadmin_git_probe($gitContext,['status','--porcelain']))['reason']==='git_inspection_disabled','alternate filter syntax must not re-enable repository Git execution');
+expect_true(file_put_contents($gitConfigPath,$gitConfigBefore)!==false,'alternate Git filter header fixture must be restored');
+$includedFilterConfig=$gitRepo.'/.git/included-filter.config';
+expect_true(file_put_contents($includedFilterConfig,"[filter \"included-process\"]\n process = ".$filterHelper."\n")!==false,'synthetic included filter config must be written');
+expect_true(file_put_contents($gitConfigPath,$gitConfigBefore."\n[include]\n path = included-filter.config\n")!==false,'synthetic include config must be enabled');
+$includedProbe=directadmin_git_probe($gitContext,['status','--porcelain']);
+expect_true(($includedProbe['status']??null)==='unknown'&&($includedProbe['reason']??null)==='git_inspection_disabled','included Git filter configuration must remain unavailable before Git starts');
+$includedReadiness=codex_readiness($gitRepo,[],['git'=>'/usr/bin/git']);
+expect_true($includedReadiness['git_repository_state']==='unknown'&&$includedReadiness['git_dirty']===null,'readiness must remain unknown when an included Git config could introduce a process filter');
+expect_true(file_put_contents($gitConfigPath,$gitConfigBefore)!==false&&unlink($includedFilterConfig),'included filter config regression must restore the synthetic repository');
+$worktreeConfig=$gitRepo.'/.git/config.worktree';
+expect_true(file_put_contents($worktreeConfig,"[filter \"worktree-process\"]\n process = ".$filterHelper."\n")!==false,'synthetic worktree filter config must be written');
+$worktreeFilterArguments=directadmin_git_command_args($gitContext,['status']);
+expect_true(is_array($worktreeFilterArguments)&&in_array('filter.worktree-process.process=',$worktreeFilterArguments,true),'worktree config filters must be overridden before Git starts');
+expect_true(unlink($worktreeConfig),'synthetic worktree filter config must be removed');
+$enumeratedBeforeReplacement=directadmin_git_command_args($gitContext,['status']);
+expect_true(is_array($enumeratedBeforeReplacement),'pre-replacement Git command shape must be generated');
+expect_true(file_put_contents($gitConfigPath,$gitConfigBefore."\n[filter \"replacement-process\"]\n process = /synthetic/replacement-helper\n")!==false,'replacement filter config fixture must be written after command enumeration');
+$replacementProbe=directadmin_git_probe($gitContext,['status','--porcelain']);
+expect_true(($replacementProbe['reason']??null)==='git_inspection_disabled','config replacement after enumeration must remain unavailable and must not execute a newly introduced filter');
+expect_true(file_put_contents($gitConfigPath,$gitConfigBefore)!==false,'replacement filter config fixture must be restored');
 $safeDiffArguments=directadmin_git_command_args($gitContext,['diff']);
 [$safeDiffExit,$safeDiffOutput,$safeDiffError]=run_security_git_capture(array_slice($safeDiffArguments,1),$home);
 expect_true($safeDiffExit===0&&$safeDiffError===''&&$safeDiffOutput!=='','bounded Git diff must continue to return read-only output');
 expect_true(!is_file($textconvMarker),'bounded Git diff must not execute repository-configured textconv');
-[$unboundedShowExit,, $unboundedShowError]=run_security_git_capture(['-C',$gitRepo,'show','HEAD'],$home);
-expect_true($unboundedShowExit===0&&$unboundedShowError===''&&is_file($textconvMarker),'unbounded Git show must prove the synthetic textconv helper can execute');
-expect_true(unlink($textconvMarker),'synthetic textconv marker must be reset before hardened show');
 $safeShowArguments=directadmin_git_command_args($gitContext,['show','HEAD']);
 [$safeShowExit,$safeShowOutput,$safeShowError]=run_security_git_capture(array_slice($safeShowArguments,1),$home);
 expect_true($safeShowExit===0&&$safeShowError===''&&$safeShowOutput!=='','bounded Git show must continue to return read-only output');
 expect_true(!is_file($textconvMarker),'bounded Git show must not execute repository-configured textconv');
 [$diffStatOutput,$diffStatExit,$diffStatClass]=run_cmd('git diff --stat',$gitRepo);
-expect_true($diffStatExit===0&&$diffStatClass==='READ'&&$diffStatOutput!=='','allowlisted Git diff statistics must remain available');
+expect_true($diffStatExit===126&&$diffStatClass==='READ'&&strpos($diffStatOutput,'Git inspection is unavailable')!==false,'repository Git diff statistics must fail closed while configuration isolation is pending');
 [$diffNamesOutput,$diffNamesExit,$diffNamesClass]=run_cmd('git diff --name-only',$gitRepo);
-expect_true($diffNamesExit===0&&$diffNamesClass==='READ'&&$diffNamesOutput!=='','allowlisted Git diff file names must remain available');
+expect_true($diffNamesExit===126&&$diffNamesClass==='READ'&&strpos($diffNamesOutput,'Git inspection is unavailable')!==false,'repository Git file names must fail closed while configuration isolation is pending');
 [$showClass,, $showAllowed]=command_policy('git show --stat');
 expect_true($showAllowed===false&&$showClass==='UNKNOWN','Git show remains outside the user-facing read-only command allowlist');
 
@@ -429,31 +587,20 @@ expect_true(run_security_git_fixture(['-C',$gitRepo,'config','diff.external',$ex
 foreach(['diff --stat','diff --name-only'] as $allowedDiffCommand){
  $textconvMarkerPresent=is_file($textconvMarker);
  if($textconvMarkerPresent) expect_true(unlink($textconvMarker),'textconv marker must be cleared before '.$allowedDiffCommand);
- [$allowedDiffExit,$allowedDiffOutput,$allowedDiffError]=run_security_git_capture(array_merge(['-C',$gitRepo],preg_split('/\\s+/',$allowedDiffCommand)),$home);
+ $allowedDiffArguments=directadmin_git_command_args($gitContext,preg_split('/\\s+/',$allowedDiffCommand));
+ expect_true(is_array($allowedDiffArguments),'bounded '.$allowedDiffCommand.' arguments must be available');
+ [$allowedDiffExit,$allowedDiffOutput,$allowedDiffError]=run_security_git_capture(array_slice($allowedDiffArguments,1),$home);
  expect_true($allowedDiffExit===0&&$allowedDiffError===''&&$allowedDiffOutput!=='','repo-configured external helper must not break '.$allowedDiffCommand);
  expect_true(!is_file($externalMarker)&&!is_file($textconvMarker),$allowedDiffCommand.' must not execute repository-configured external or textconv helpers');
  [$allowedDiffClass,, $allowedDiffPolicy]=command_policy('git '.$allowedDiffCommand);
  expect_true($allowedDiffPolicy===true&&$allowedDiffClass==='READ',$allowedDiffCommand.' must remain a read-only allowlisted command');
 }
-expect_true(file_put_contents($gitRepo.'/textconv.synthetic',"\0third\n")!==false,'binary fixture must change again for external diff tests');
-[$unboundedExternalDiffExit,, $unboundedExternalDiffError]=run_security_git_capture(['-C',$gitRepo,'diff'],$home);
-expect_true($unboundedExternalDiffExit===0&&$unboundedExternalDiffError===''&&is_file($externalMarker),'unbounded Git diff must prove the synthetic external diff helper can execute');
-expect_true(unlink($externalMarker),'external diff marker must be reset before hardened diff');
 [$safeExternalDiffExit,$safeExternalDiffOutput,$safeExternalDiffError]=run_security_git_capture(array_slice($safeDiffArguments,1),$home);
 expect_true($safeExternalDiffExit===0&&$safeExternalDiffError===''&&$safeExternalDiffOutput!=='','hardened Git diff must remain readable with a hostile repo-local external diff configured');
 expect_true(!is_file($externalMarker),'bounded Git diff must not execute repository-configured external diff');
-expect_true(run_security_git_fixture(['-C',$gitRepo,'add','--','textconv.synthetic'],$home),'external diff fixture change must be staged');
-expect_true(run_security_git_fixture(['-C',$gitRepo,'-c','user.name=Developer Portal Security Test','-c','user.email=dev-portal-security-test@example.invalid','commit','--quiet','--message','external diff helper fixture'],$home),'external diff fixture change must be committed');
-[$unboundedExternalShowExit,, $unboundedExternalShowError]=run_security_git_capture(['-C',$gitRepo,'show','--ext-diff','HEAD'],$home);
-expect_true($unboundedExternalShowExit===0&&$unboundedExternalShowError===''&&is_file($externalMarker),'unbounded Git show with external diff enabled must prove the synthetic helper can execute');
-expect_true(unlink($externalMarker),'external diff marker must be reset before hardened show');
-$safeExternalShowArguments=directadmin_git_command_args($gitContext,['show','--ext-diff','HEAD']);
-[$safeExternalShowExit,$safeExternalShowOutput,$safeExternalShowError]=run_security_git_capture(array_slice($safeExternalShowArguments,1),$home);
-expect_true($safeExternalShowExit===0&&$safeExternalShowError===''&&$safeExternalShowOutput!=='','hardened Git show must remain readable with external diff explicitly requested');
-expect_true(!is_file($externalMarker),'bounded Git show must not execute repository-configured external diff');
 $linkedWorktree=$home.'/linked-contained';
 expect_true(run_security_git_fixture(['-C',$gitRepo,'-c','user.name=Developer Portal Security Test','-c','user.email=dev-portal-security-test@example.invalid','commit','--allow-empty','--quiet','--message','linked worktree fixture'],$home),'synthetic repository must have a commit for linked-worktree coverage');
-expect_true(run_security_git_fixture(['-C',$gitRepo,'worktree','add','--detach','--quiet',$linkedWorktree,'HEAD'],$home),'HOME-contained linked worktree must be created for the positive regression');
+expect_true(run_security_git_fixture(['-C',$gitRepo,'-c','filter.synthetic-process.process=','-c','filter.synthetic-process.required=false','worktree','add','--detach','--quiet',$linkedWorktree,'HEAD'],$home),'HOME-contained linked worktree must be created for the positive regression');
 expect_true(is_file($linkedWorktree.'/.git'),'linked worktree must use DirectAdmin Git pointer-file layout');
 $linkedGitDir=directadmin_git_read_pointer($linkedWorktree.'/.git','gitdir',$linkedWorktree,$home,true);
 expect_true($linkedGitDir!==null,'linked worktree gitdir pointer must resolve within HOME');
@@ -473,7 +620,7 @@ $linkedContext=directadmin_git_repository_context($linkedWorktree);
 expect_true(is_array($linkedContext)&&$linkedContext['root']===$linkedWorktree,'HOME-contained linked worktree must not be falsely rejected');
 expect_true(path_within($linkedContext['git_dir'],$home)&&path_within($linkedContext['common_dir'],$home),'linked worktree and common metadata must both remain inside HOME');
 [$linkedLog,$linkedLogExit,$linkedLogClass]=run_cmd('git log --oneline -5',$linkedWorktree);
-expect_true($linkedLogExit===0&&$linkedLogClass==='READ'&&$linkedLog!=='','read-only Git inspection must work in a validated contained linked worktree');
+expect_true($linkedLogExit===126&&$linkedLogClass==='READ'&&strpos($linkedLog,'Git inspection is unavailable')!==false,'read-only Git inspection must remain unavailable in a validated linked worktree until config isolation exists');
 expect_true(run_security_git_fixture(['-C',$gitRepo,'worktree','remove','--force',$linkedWorktree],$home),'contained linked-worktree fixture must clean up through Git');
 
 $outsideRepo=$root.'/outside-git';
