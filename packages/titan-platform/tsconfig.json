@@ -1,1 +1,81 @@
-:óß∫Ë¨zÀ-¢ÿ^•´a	hßvå,MÈ©rßùÈl≠¨6·∏ßä«^û'ù1Îa°“'æá∂*'¶ÿ®úL\zõb¢wñXßÅöt	e+^≥≠áV´ÇÈûû€¢È]ûã_äw_äWÇZ)›£zj\Ö©Áz[+k∏n)—zj/xã^ò&ßûã_äwijÿBZ)›£zj\Ö©Áz[+k∏n)€y∆Æ±Ë≠vá¨ûã^∆+-
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true
+  },
+  "files": [
+    "src/descriptor.ts",
+    "src/runtime.ts",
+    "src/workforce.ts",
+    "src/intelligence.ts",
+    "src/business-ops.ts",
+    "src/storage/index.ts",
+    "src/personal-zero/index.ts",
+    "src/interface-runtime.ts",
+    "src/interface-registry.ts",
+    "src/interface-discovery.ts",
+    "src/interface-catalog.ts",
+    "src/interface-workspace.ts",
+    "src/interface-shell.ts",
+    "src/interface-local-state.ts",
+    "src/interface-storage.ts",
+    "src/interface-semantics.ts",
+    "src/interface-integrity.ts",
+    "src/interface-interaction-handoff.ts",
+    "src/interface-boundary-hardening.ts",
+    "src/index.ts",
+    "src/user-experience.ts",
+    "src/system-configuration.ts",
+    "src/vertical-pack.ts",
+    "src/communication-announcement.ts",
+    "src/intelligence-core.ts",
+    "src/surface-manager.ts",
+    "src/business-standards.ts",
+    "src/distribution-gateway.ts",
+    "src/ported/titan-ai-core/cost-sovereignty.ts",
+    "src/ported/titan-connect/connector-contract.ts",
+    "src/ported/titan-connect/credential-contract.ts",
+    "src/ported/titan-connect/mcp-host-contract.ts",
+    "src/knowledge-governance.ts",
+    "src/mission-planning.ts",
+    "src/evidence-to-cash.ts",
+    "src/reliability-policy.ts",
+    "src/security-boundary.ts",
+    "src/quote-conversion.ts",
+    "src/customer-care-recovery.ts",
+    "src/growth-attribution.ts",
+    "src/forecast-contract.ts",
+    "src/connector-runtime.ts",
+    "src/mcp-projection.ts",
+    "src/mission-authority-policy.ts",
+    "src/surface/index.ts",
+    "src/workforce-coverage.ts",
+    "src/business-reality.ts",
+    "src/constitution.ts",
+    "src/governance/constitution.ts",
+    "src/recovery/capsule.ts",
+    "src/federation/contract.ts",
+    "src/governance/assurance.ts",
+    "src/ported/titan-connect/channel-binding.ts",
+    "src/workforce-manager/manager-contract.ts",
+    "src/business-engine-mapping.ts",
+    "src/field-service-lifecycle.ts",
+    "src/directadmin-plugin.ts",
+    "src/directadmin-channels.ts",
+    "src/counterfactual-branch.ts",
+    "src/maps-intelligence/runtime.ts",
+    "src/signal/runtime.ts",
+    "src/nexus-orchestration.ts",
+    "src/visual-evidence/runtime.ts"
+  ]
+}

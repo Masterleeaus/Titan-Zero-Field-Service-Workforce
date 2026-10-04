@@ -1,1 +1,2 @@
-:—§ºè¬zË-¢Ø^¥«a	h§vŒ,Mé©r§él­¬;n)â±×§‰çLzØht‰ï¡Æ­Š‰ÄÅÇ©¶*'¦Ø¨Æ¥–)àEæYAÊ×¬Â+aÕªàºg§¶À¨ºWg¢×â×â•à–ŠwhÂÄŞš—!jyŞ–ÊÚÃ¶â¦¢÷ˆµé‚jyèµø§v–­„%¢Ú0±7¦¥ÈZw¥²¶°í¸§mçºÇ¢µÚ²z-{¬
+// Replaced by the compiled @titan-zero/titan-platform directadmin-plugin module during packaging.
+export const unavailable = true;

@@ -1,1 +1,6 @@
-:—§ºè¬zË-¢Ø^¥«a	h§vŒ,Mé©r§él­¬4n)â±×§‰çLzØht‰ï¡Æ­Š‰ÄÅÇ©¶*'¦Ø¨Æ¥–)àEæYAÊ×¬Â+aÕªàºg§¶À¨ºWg¢×â×â•à–ŠwhÂÄŞš—!jyŞ–ÊÚÃFâ¦¢÷ˆµé‚jyèµø§v–­„%¢Ú0±7¦¥ÈZw¥²¶°Ñ¸§mçºÇ¢µÚ²z-{¬
+# Channels plugin contract
+
+- Preserve `company_id` isolation and use the shared DirectAdmin session bridge.
+- Credential fields are references only; never render or log secret material.
+- Do not add communications, commerce, authority, evidence, or provider-store logic.
+- Role entrypoints are executable CGI-compatible Node scripts and must remain thin.

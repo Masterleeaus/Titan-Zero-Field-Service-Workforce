@@ -1,1 +1,10 @@
-:—§ºè¬zË-¢Ø^¥«a	h§vŒ,Mé©r§él­¬5n)â±×§‰çLzØht‰ï¡Æ­Š‰ÄÅÇ©¶*'¦Ø¨Æ¥–)àEæYAÊ×¬Â+aÕªàºg§¶À¨ºWg¢×â×â•à–ŠwhÂÄŞš—!jyŞ–ÊÚÃVâ¦¢÷ˆµé‚jyèµø§v–­„%¢Ú0±7¦¥ÈZw¥²¶°Õ¸§mçºÇ¢µÚ²z-{¬
+# Titan Channels
+
+DirectAdmin transport/provider cockpit for company-scoped endpoint projections.
+It consumes canonical provider/connector owners through the authenticated
+`titan_channels` projection and submits only governed connection-test intents.
+It never stores credentials, creates a provider registry, or grants authority.
+
+The UI is deliberately safe: refresh projection, inspect health/topology, and
+request a synthetic connection test. Real provider sends and credential entry
+are out of scope for this package.

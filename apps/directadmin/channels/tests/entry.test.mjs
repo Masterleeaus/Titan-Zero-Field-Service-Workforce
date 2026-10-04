@@ -1,1 +1,13 @@
-:—§ºè¬zË-¢Ø^¥«a	h§vŒ,Mé©r§él­¬5å¸§ŠÇ^ž'1ëa¡Ò'¾‡¶*'¦Ø¨œL\z›b¢w–X§št	e+^³­‡V«‚éžžÛ¢é]ž‹_Šw_ŠW‚Z)Ý£zj\…©çz[+kyn)Ñzj/x‹^˜&§ž‹_ŠwijØBZ)Ý£zj\…©çz[+kyn)ÛyÆ®±è­v‡¬ž‹^Æ+-
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { renderEntry } from '../lib/entry.mjs';
+
+test('renders all DirectAdmin role entry documents with an SDK slot', () => {
+  for (const role of ['admin', 'reseller', 'user']) {
+    const html = renderEntry(role, { sdkModule: 'export const fixture = true;' });
+    assert.match(html, /titan-channels/);
+    assert.match(html, /titan-sdk/);
+    assert.match(html, /data:text\/javascript;base64,/);
+  }
+  assert.throws(() => renderEntry('root'), /unsupported DirectAdmin role/);
+});

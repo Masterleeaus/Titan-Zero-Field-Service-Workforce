@@ -1,1 +1,3 @@
-:—§ºè¬zË-¢Ø^¥«a	h§vŒ,Mé©r§él­¬5á¸§ŠÇ^ž'1ëa¡Ò'¾‡¶*'¦Ø¨œL\z›b¢w–X§št	e+^³­‡V«‚éžžÛ¢é]ž‹_Šw_ŠW‚Z)Ý£zj\…©çz[+kxn)Ñzj/x‹^˜&§ž‹_ŠwijØBZ)Ý£zj\…©çz[+kxn)ÛyÆ®±è­v‡¬ž‹^Æ+-
+#!/bin/sh
+set -eu
+exec "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/install.sh"
