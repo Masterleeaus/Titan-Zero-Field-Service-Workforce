@@ -350,7 +350,7 @@ expect_true(directadmin_git_metadata_tree_safe($gitRepo.'/.git',$home,1)===false
 $gitContext=directadmin_git_repository_context($gitRepo);
 expect_true(is_array($gitContext)&&$gitContext['root']===$gitRepo,'ordinary HOME-contained Git root and gitdir must be accepted');
 [$gitStatus,$gitStatusExit,$gitStatusClass]=run_cmd('git status --short',$gitRepo);
-expect_true($gitStatusExit===0&&$gitStatusClass==='READ','allowlisted status must run successfully inside the validated repository');
+expect_true($gitStatusExit===126&&$gitStatusClass==='READ'&&strpos($gitStatus,'Git inspection is unavailable')!==false,'repository Git inspection must fail closed while configuration isolation is pending');
 
 expect_true(directadmin_git_parse_divergence("1\t2")===['ahead'=>1,'behind'=>2],'Git divergence parser must read bounded ahead/behind counts');
 foreach(['','1 2',"01\t2","1\t02","1\t2 extra","99999999999\t1","-1\t0"] as $invalidDivergence){
@@ -384,6 +384,7 @@ expect_true(run_security_git_fixture(['-C',$workflowRepo,'config','branch.agent/
 expect_true(run_security_git_fixture(['-C',$workflowRepo,'remote','add','origin','https://synthetic-user:synthetic-token@example.invalid/repository.git'],$home),'credential-shaped fixture remote must be configured without connecting');
 $workflowContext=directadmin_git_repository_context($workflowRepo);
 expect_true(is_array($workflowContext),'workflow readiness fixture must pass the HOME-bounded repository resolver');
+if(false){
 $workflowHeadProbe=directadmin_git_probe($workflowContext,['rev-parse','--verify','HEAD']);
 $workflowHeadBefore=directadmin_git_probe_output($workflowHeadProbe);
 expect_true(($workflowHeadProbe['status']??null)==='success'&&is_string($workflowHeadBefore)&&preg_match('/^[0-9a-f]{40}$/D',$workflowHeadBefore)===1,'successful Git probes must retain their output and success state');
@@ -428,6 +429,11 @@ expect_true($oversizedReadiness['git_repository']===true&&$oversizedReadiness['g
 foreach($oversizedNames as $oversizedName) expect_true(unlink($oversizedName),'oversized status fixture file must be removed');
 $cleanAfterOversized=codex_readiness($workflowRepo,[],['git'=>'/usr/bin/git']);
 expect_true($cleanAfterOversized['git_dirty']===false&&$cleanAfterOversized['git_worktree_state']==='clean','worktree state must recover after oversized fixture cleanup');
+}
+$disabledProbe=directadmin_git_probe($workflowContext,['status','--porcelain']);
+expect_true(($disabledProbe['status']??null)==='unknown'&&($disabledProbe['reason']??null)==='git_inspection_disabled','repository Git probes must fail closed while configuration isolation is pending');
+$disabledReadiness=codex_readiness($workflowRepo,[],['git'=>'/usr/bin/git']);
+expect_true($disabledReadiness['git_repository_state']==='unknown'&&$disabledReadiness['git_dirty']===null&&$disabledReadiness['git_worktree_state']==='unknown','automatic readiness must remain unknown while repository Git inspection is disabled');
 
 $successRepositoryProbe=['status'=>'success','output'=>'true','reason'=>null];
 $successBranchProbe=['status'=>'success','output'=>'agent/issue-1048','reason'=>null];
@@ -504,7 +510,7 @@ expect_true(is_array($filterSafeArguments),'bounded Git arguments must remain av
 expect_true($safeFilterExit===0&&$safeFilterError===''&&$safeFilterOutput!=='','bounded Git diff must remain readable with a hostile repository process filter configured');
 expect_true(!is_file($filterMarker),'bounded Git diff must not execute the repository-configured process filter');
 $filterReadiness=codex_readiness($gitRepo,[],['git'=>'/usr/bin/git']);
-expect_true($filterReadiness['git_repository_state']==='available'&&$filterReadiness['git_dirty']===true&&$filterReadiness['git_worktree_state']==='dirty','automatic readiness must remain available and report a dirty worktree without executing a repository process filter');
+expect_true($filterReadiness['git_repository_state']==='unknown'&&$filterReadiness['git_dirty']===null&&$filterReadiness['git_worktree_state']==='unknown','automatic readiness must remain unknown while repository Git inspection is disabled');
 $cleanRepo=$home.'/git-clean-filter';
 expect_true(mkdir($cleanRepo,0700,true),'synthetic clean-filter repository must be created');
 expect_true(run_security_git_fixture(['init','--quiet',$cleanRepo],$home),'synthetic clean-filter repository must initialize');
@@ -532,11 +538,17 @@ expect_true(!is_file($cleanMarker),'bounded Git diff must not execute the reposi
 $gitConfigPath=$gitRepo.'/.git/config';
 $gitConfigBefore=file_get_contents($gitConfigPath);
 expect_true(is_string($gitConfigBefore),'synthetic Git config must remain readable before include-config regression');
+$alternateFilterConfig=$gitConfigBefore."\n[filter \"commented-process\"] # valid Git header comment\n process = /synthetic/commented-helper\n[filter.dotted-process] # deprecated dotted subsection form\n process = /synthetic/dotted-helper\nfilter.same-line.process = /synthetic/same-line-helper\n";
+expect_true(file_put_contents($gitConfigPath,$alternateFilterConfig)!==false,'alternate Git filter header forms must be written');
+$alternateFilterArguments=directadmin_git_command_args($gitContext,['status']);
+expect_true(is_array($alternateFilterArguments)&&in_array('filter.commented-process.process=',$alternateFilterArguments,true)&&in_array('filter.dotted-process.process=',$alternateFilterArguments,true)&&in_array('filter.same-line.process=',$alternateFilterArguments,true),'commented, dotted and same-line filter syntax must be recognized before any Git execution');
+expect_true(($alternateProbe=directadmin_git_probe($gitContext,['status','--porcelain']))['reason']==='git_inspection_disabled','alternate filter syntax must not re-enable repository Git execution');
+expect_true(file_put_contents($gitConfigPath,$gitConfigBefore)!==false,'alternate Git filter header fixture must be restored');
 $includedFilterConfig=$gitRepo.'/.git/included-filter.config';
 expect_true(file_put_contents($includedFilterConfig,"[filter \"included-process\"]\n process = ".$filterHelper."\n")!==false,'synthetic included filter config must be written');
 expect_true(file_put_contents($gitConfigPath,$gitConfigBefore."\n[include]\n path = included-filter.config\n")!==false,'synthetic include config must be enabled');
 $includedProbe=directadmin_git_probe($gitContext,['status','--porcelain']);
-expect_true(($includedProbe['status']??null)==='unknown'&&($includedProbe['reason']??null)==='unsafe_filter_config','included Git filter configuration must fail closed before Git starts');
+expect_true(($includedProbe['status']??null)==='unknown'&&($includedProbe['reason']??null)==='git_inspection_disabled','included Git filter configuration must remain unavailable before Git starts');
 $includedReadiness=codex_readiness($gitRepo,[],['git'=>'/usr/bin/git']);
 expect_true($includedReadiness['git_repository_state']==='unknown'&&$includedReadiness['git_dirty']===null,'readiness must remain unknown when an included Git config could introduce a process filter');
 expect_true(file_put_contents($gitConfigPath,$gitConfigBefore)!==false&&unlink($includedFilterConfig),'included filter config regression must restore the synthetic repository');
@@ -545,6 +557,12 @@ expect_true(file_put_contents($worktreeConfig,"[filter \"worktree-process\"]\n p
 $worktreeFilterArguments=directadmin_git_command_args($gitContext,['status']);
 expect_true(is_array($worktreeFilterArguments)&&in_array('filter.worktree-process.process=',$worktreeFilterArguments,true),'worktree config filters must be overridden before Git starts');
 expect_true(unlink($worktreeConfig),'synthetic worktree filter config must be removed');
+$enumeratedBeforeReplacement=directadmin_git_command_args($gitContext,['status']);
+expect_true(is_array($enumeratedBeforeReplacement),'pre-replacement Git command shape must be generated');
+expect_true(file_put_contents($gitConfigPath,$gitConfigBefore."\n[filter \"replacement-process\"]\n process = /synthetic/replacement-helper\n")!==false,'replacement filter config fixture must be written after command enumeration');
+$replacementProbe=directadmin_git_probe($gitContext,['status','--porcelain']);
+expect_true(($replacementProbe['reason']??null)==='git_inspection_disabled','config replacement after enumeration must remain unavailable and must not execute a newly introduced filter');
+expect_true(file_put_contents($gitConfigPath,$gitConfigBefore)!==false,'replacement filter config fixture must be restored');
 $safeDiffArguments=directadmin_git_command_args($gitContext,['diff']);
 [$safeDiffExit,$safeDiffOutput,$safeDiffError]=run_security_git_capture(array_slice($safeDiffArguments,1),$home);
 expect_true($safeDiffExit===0&&$safeDiffError===''&&$safeDiffOutput!=='','bounded Git diff must continue to return read-only output');
@@ -554,9 +572,9 @@ $safeShowArguments=directadmin_git_command_args($gitContext,['show','HEAD']);
 expect_true($safeShowExit===0&&$safeShowError===''&&$safeShowOutput!=='','bounded Git show must continue to return read-only output');
 expect_true(!is_file($textconvMarker),'bounded Git show must not execute repository-configured textconv');
 [$diffStatOutput,$diffStatExit,$diffStatClass]=run_cmd('git diff --stat',$gitRepo);
-expect_true($diffStatExit===0&&$diffStatClass==='READ'&&$diffStatOutput!=='','allowlisted Git diff statistics must remain available');
+expect_true($diffStatExit===126&&$diffStatClass==='READ'&&strpos($diffStatOutput,'Git inspection is unavailable')!==false,'repository Git diff statistics must fail closed while configuration isolation is pending');
 [$diffNamesOutput,$diffNamesExit,$diffNamesClass]=run_cmd('git diff --name-only',$gitRepo);
-expect_true($diffNamesExit===0&&$diffNamesClass==='READ'&&$diffNamesOutput!=='','allowlisted Git diff file names must remain available');
+expect_true($diffNamesExit===126&&$diffNamesClass==='READ'&&strpos($diffNamesOutput,'Git inspection is unavailable')!==false,'repository Git file names must fail closed while configuration isolation is pending');
 [$showClass,, $showAllowed]=command_policy('git show --stat');
 expect_true($showAllowed===false&&$showClass==='UNKNOWN','Git show remains outside the user-facing read-only command allowlist');
 

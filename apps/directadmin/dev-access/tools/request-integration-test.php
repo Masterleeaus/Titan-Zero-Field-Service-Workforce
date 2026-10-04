@@ -621,12 +621,17 @@ $filterEnvironment=[
  'GIT_CONFIG_GLOBAL'=>'/dev/null',
  'GIT_TERMINAL_PROMPT'=>'0'
 ];
-integration_expect(file_put_contents($filterRepo.'/.gitattributes',"*.synthetic filter=synthetic-process\n")!==false,'actual-role process-filter attribute must be written');
+integration_expect(file_put_contents($filterRepo.'/.gitattributes',"*.synthetic filter=synthetic-process\n*.comment-synthetic filter=synthetic-comment\n*.dotted-synthetic filter=synthetic-dotted\n")!==false,'actual-role process-filter attributes must be written');
 integration_expect(file_put_contents($filterRepo.'/process.synthetic',"before\n")!==false,'actual-role process-filter fixture must be written');
-integration_git_command($filterRepo,['add','--','.gitattributes','process.synthetic'],$filterEnvironment);
+integration_expect(file_put_contents($filterRepo.'/process.comment-synthetic',"before\n")!==false,'actual-role comment-header process-filter fixture must be written');
+integration_expect(file_put_contents($filterRepo.'/process.dotted-synthetic',"before\n")!==false,'actual-role dotted-header process-filter fixture must be written');
+integration_git_command($filterRepo,['add','--','.gitattributes','process.synthetic','process.comment-synthetic','process.dotted-synthetic'],$filterEnvironment);
 integration_git_command($filterRepo,['-c','user.name=DirectAdmin Fixture','-c','user.email=fixture@example.invalid','commit','--quiet','--message','process filter fixture'],$filterEnvironment);
 integration_git_command($filterRepo,['config','filter.synthetic-process.process',$filterHelper],$filterEnvironment);
+integration_expect(file_put_contents($filterRepo.'/.git/config',file_get_contents($filterRepo.'/.git/config')."\n[filter \"synthetic-comment\"] # valid commented filter header\n process = ".$filterHelper."\n[filter.synthetic-dotted] # deprecated dotted filter header\n process = ".$filterHelper."\n")!==false,'actual-role alternate filter headers must be configured');
 integration_expect(file_put_contents($filterRepo.'/process.synthetic',"after\n")!==false,'actual-role process-filter fixture must be changed');
+integration_expect(file_put_contents($filterRepo.'/process.comment-synthetic',"after\n")!==false,'actual-role comment-header process-filter fixture must be changed');
+integration_expect(file_put_contents($filterRepo.'/process.dotted-synthetic',"after\n")!==false,'actual-role dotted-header process-filter fixture must be changed');
 [$unboundedFilterExit,,]=integration_git_capture($filterRepo,['diff','--stat'],$filterEnvironment);
 integration_expect(is_file($filterMarker),'unbounded fixture Git diff must execute the synthetic process filter');
 if(is_file($filterMarker)) integration_expect(unlink($filterMarker),'actual-role process-filter marker must be reset before role execution');
@@ -637,7 +642,7 @@ $filterRoleEnvironment=$common+[
  'POST'=>'stdin=true','CONTENT_LENGTH'=>(string)strlen($filterBody)
 ];
 [$filterRoleHtml]=integration_run_role($root,'admin',$filterRoleEnvironment,$filterBody);
-integration_expect(strpos($filterRoleHtml,'Exit code: 0')!==false,'actual admin role Git diff must remain successful with a hostile repository process filter configured');
+integration_expect(strpos($filterRoleHtml,'Git inspection is unavailable')!==false,'actual admin role Git diff must fail closed while repository configuration isolation is pending');
 integration_expect(!is_file($filterMarker),'actual admin role Git diff must not execute the repository-configured process filter');
 $remoteUrl='https://synthetic-user:synthetic-token@example.invalid/repo.git';
 $gitConfig=$gitRepo.'/.git/config';

@@ -734,9 +734,15 @@ function directadmin_git_filter_names($context){
   // Included config can introduce filter commands after this check. Refuse it
   // rather than trying to model Git's include resolution at request time.
   if(preg_match('/^\s*(?:include(?:If)?\.|\[include(?:If)?(?:\s+"[^"]*")?\])\s*/mi',$contents)===1) return null;
-  $sections=[];
-  if(preg_match_all('/^\s*\[filter\s+"([^"]*)"\]\s*$/mi',$contents,$sections)===false) return null;
-  foreach($sections[1]??[] as $name){
+  foreach(preg_split('/\R/',$contents)?:[] as $line){
+   if(trim($line)===''||preg_match('/^\s*[#;]/',$line)===1) continue;
+   if(preg_match('/^\s*\[([^]]*)\]\s*(?:[#;].*)?$/',$line,$section)!==1) continue;
+   $header=trim($section[1]);
+   $name=null;
+   if(preg_match('/\Afilter\s+"([^"]*)"\z/i',$header,$headerMatch)===1) $name=$headerMatch[1];
+   elseif(preg_match('/\Afilter\.([A-Za-z0-9][A-Za-z0-9._-]{0,63})\z/i',$header,$headerMatch)===1) $name=$headerMatch[1];
+   elseif(preg_match('/\Afilter(?:\s|\.|$)/i',$header)===1) return null;
+   if($name===null) continue;
    if(!preg_match('/\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z/D',$name)) return null;
    $names[$name]=true;
   }
@@ -869,6 +875,7 @@ function directadmin_git_environment(){
  ];
 }
 function directadmin_git_probe($context,$arguments){
+ return ['status'=>'unknown','output'=>null,'reason'=>'git_inspection_disabled'];
  $commandArguments=directadmin_git_command_args($context,$arguments);
  if($commandArguments===null) return ['status'=>'unknown','output'=>null,'reason'=>'unsafe_filter_config'];
  $argv=array_merge(['/usr/bin/env','timeout','5s'],$commandArguments);
@@ -1012,6 +1019,7 @@ function run_cmd($cmd,$cwd){
  if($programParts===null) return ['Blocked by Developer Portal policy [READ]: File paths, options or arguments are outside the bounded terminal policy.',126,'READ'];
  $environment=['PATH'=>'/usr/local/bin:/usr/bin:/bin','HOME'=>home_dir()];
  if(strtolower($parts[0])==='git'){
+  return ['Git inspection is unavailable while repository configuration isolation is pending.',126,'READ'];
   $context=directadmin_git_repository_context($cwd);
   if($context===null) return ['Blocked by Developer Portal policy [READ]: Git worktree and metadata must resolve inside the account HOME.',126,'READ'];
    $programParts=directadmin_git_command_args($context,array_slice($parts,1));
