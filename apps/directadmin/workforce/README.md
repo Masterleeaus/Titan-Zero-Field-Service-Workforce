@@ -5,6 +5,10 @@ This package is the operator cockpit for the canonical hosted Workforce. It has
 no database, queue, agent executor, identity mapping, credentials or authority engine.
 Native Titan FSM remains the default; Frappe is optional.
 
+The first-release presentation is cleaning-first: it opens company-scoped cleaner
+teams and hosted work. It does not add non-cleaning workflows or populate live
+workers from the cleaning bundle catalogue.
+
 **Packaging candidate only — not live-install-ready.** This archive has only been
 validated in disposable test/staging environments; its upstream host contracts and
 real DirectAdmin/Apache behavior remain uncommissioned.
@@ -14,23 +18,35 @@ real DirectAdmin/Apache behavior remain uncommissioned.
 The executable role routes render the same company-scoped cockpit. The browser
 uses the actual shared #1049 `DirectAdminCockpitSession`, with its fetcher supplied
 by the published #812 Server Node adapter.
-PR #1201 is merged to main and contains the #811 canonical company-filtered read-only
-projection owner and optional `/v1/directadmin/*` Fetch-handler mount. Its published
-controls list is empty and lifecycle proposals are explicitly denied pending canonical
-caller-management authority. The API is not live-certified. Missing commissioned
-session/CSRF bootstrap, denied identity, invalid company data or unavailable host fail closed.
-The current implementation is **not certified complete or ready for production**.
-Authenticated host HTML must supply `<meta name="titan-directadmin-csrf" content="…">`
-with the separately bound nonce; the plugin never creates this nonce or an identity
-from DirectAdmin environment/role. The credential remains an HttpOnly cookie.
-A fixture-based passing test does not prove a commissioned host or identity bridge.
+PR #1201 is merged to main and contains the #811 canonical company-filtered
+projection owner and optional `/v1/directadmin/*` Fetch-handler mount. A host with
+no current manager grant publishes `controls: []` and stays read-only; the owner can
+publish only its typed `titan.workforce.reassign` control after resolving current
+company manager authority. All other lifecycle proposals remain unsupported. The API
+is not live-certified. Missing commissioned session/bootstrap routes, denied
+identity, invalid company data or unavailable host fail closed. The current
+implementation is **not certified complete or ready for production**. The browser
+uses the #1300 role-local `bootstrap-nonce.raw` and `bootstrap.raw` contract; it
+never creates the nonce or an identity from DirectAdmin environment/role, and it
+never reads or forwards DirectAdmin cookies. The shared SDK retains the resulting
+credential only in its HttpOnly cookie. A fixture-based passing test does not
+prove a commissioned host or identity bridge.
 DirectAdmin role executables emit the HTML document only. They do not consume CGI
 POST stdin, PHP superglobals, query parameters, or host environment variables as
 identity/CSRF inputs. The browser SDK makes same-origin API requests; the direct
 DirectAdmin POST/environment bridge is not assumed to work. Installed Dev Access
 1.1.3 has a reported CSRF failure and #1048 is repairing and verifying that bridge.
-Until the host request owner proves it, session bootstrap and governed POSTs remain
-uncommissioned and the cockpit stays unavailable/denied.
+The #1300 host adapter draft PR #1395 owns the role RAW entrypoints and
+package/install allowlist. Its current head `914c0e1b` is integrated on this
+continuation branch by a normal merge; its source-owned files remain unchanged.
+The 26-file v0.1.6 candidate packages all three role nonce/bootstrap handlers and
+their shared adapter. The browser test extracts that package, invokes the User
+RAW scripts, and verifies nonce-cookie stripping plus prior-session forwarding
+and cookie rotation on reconnect/company change. The host endpoint remains a
+controlled loopback fixture: it does not prove the #302/#811 production identity
+chain, protected upstream provisioning, OS CGI/shebang execution, or live
+DirectAdmin/Apache cookie isolation. PR #1395 remains draft and its hosted CI
+checks are evidence for source regressions, not publication or commissioning.
 DirectAdmin documents role entrypoints as executable scripts receiving request data
 through process environment; `pipe_post=yes` sets `POST=stdin=true` and delivers the
 POST body on stdin. The Workforce test now launches the packaged role executable as
@@ -76,19 +92,42 @@ authorized disposable Apache/DirectAdmin host using cookie-name-only evidence.
 See the exact run limits and remaining host inputs in
 `docs/directadmin/WORKFORCE-COCKPIT-INTEGRATION.md`.
 
-The UI displays canonical roster/worker identity, hierarchy relationships, work
-states, owner-provided source/freshness/evidence and receipt references. It only
-renders lifecycle submission when the current host publishes a supported control;
-the current #811 projection explicitly publishes none and is read-only.
-It preserves human versus digital identity and never promotes model/provider
-identity or DirectAdmin role to execution authority. A provider acknowledgement
-or completed agent run is not a verified business outcome.
+The UI defaults to company-scoped cleaner-team groups, with a hosted work queue,
+canonical skill-proof view, roster, governed action form and receipt/evidence view.
+The team and queue rows still come only from current hosted company projections;
+cleaning role/job catalogue entries are never imported as live workers. When the
+host exposes the exact reassign descriptor, operators can open an explicit READY-work
+reassignment review from the team/queue view. The browser binds the current projected
+assignee, filters out inactive or capability-mismatched target members, then submits
+through the shared #1049 intent path. The canonical owner rechecks management authority,
+approval, company context and assignee compare-and-set; controls are hidden when the
+host publishes no descriptor. A `REQUESTED` acknowledgement is never reported as a
+verified outcome, and accepted evidence is shown only after a canonical reread.
 
-The Teams view groups only workers returned for the current `company_id`, using
-their canonical `team_id` fields; unassigned workers remain visible. The hosted
-projection does not provide a named team registry or skill catalog, so those
-facets are labelled unavailable instead of being synthesized. Projected active
-status and capabilities are descriptive inputs, not execution authority.
+The hosted projection does not carry cleaning service, site, area checklist, supply or
+visit-time fields. The work queue labels those details unavailable and does not infer a
+cleaning visit from objectives, capability strings or evidence references. Skills use
+the owner-provided proof projection when available; proof state and contextual
+performance never decide assignment or grant authority. The 16 cleaning specialist
+definitions and seven job-type templates in the bundle remain declarative metadata,
+not active agents or visits. Open draft #1393 binds six profile responsibilities to
+the existing native adapters for suggest-only plans and marks ten profiles unavailable.
+It does not bind profiles to current-company worker or skill records and its profile
+route uses the legacy web session/database; this DirectAdmin consumer does not import
+it as hosted truth. #1384 still owns company-worker mapping, and #1372 owns canonical
+proof-source composition.
+
+The UI displays canonical roster/worker identity, hierarchy relationships, work
+states, owner-provided source/freshness/evidence and receipt references. It preserves
+human versus digital identity and never promotes model/provider identity or
+DirectAdmin role to execution authority.
+A provider acknowledgement or completed agent run is not a verified business outcome.
+
+The Cleaner teams view groups only workers returned for the current `company_id`,
+using their canonical `team_id` fields; unassigned workers remain visible. The host
+does not provide a named team registry or company-worker cleaning profile binding, so
+those facets remain unavailable instead of being synthesized. Projected active status
+and capabilities are descriptive inputs, not execution authority.
 
 Unsupported host facets are labelled unavailable, including detailed trust,
 autonomy, knowledge, capacity/value, Mission and staffing projections. No sample
@@ -111,7 +150,7 @@ The builder requires the current canonical browser session and package-validator
 and runs the shared validator on the extracted final package. It produces a flat `titan_workforce.tar.gz` and SHA256 sidecar, applies
 executable modes, extracts the final tarball, compares contents/modes and runs
 staging-location preflight. The manifest controls the artifact version (currently
-0.1.5). Tests and development fixtures are excluded. The package requires the
+0.1.6). Tests and development fixtures are excluded. The package requires the
 separately installed Titan Server Node plugin for its published relay module; it
 does not vendor or shadow that owner.
 
@@ -154,9 +193,16 @@ out-of-order responses, duplicate clicks, false verification and hostile text.
 
 - #1049: shared SDK, authenticated DA session bridge, current company, CSRF,
   handoff/revocation, navigation and contribution infrastructure.
-- #811: independently hosted Workforce, canonical registry/work/runs, read-only
-  DirectAdmin projection and explicit denial of lifecycle proposals until caller
-  management authority exists; #1182: conversation transport.
+- #811: independently hosted Workforce, canonical registry/work/runs, company-
+  filtered DirectAdmin projection and governed intent owner. The default projection
+  stays read-only with `controls: []`; only the typed READY reassignment path can
+  appear after current manager authority/evidence checks pass. #1182 owns conversation
+  transport.
+- #1364/#1372: typed canonical skill-proof projection and hosted source composition;
+  this package displays the versioned projection without rebuilding its rules.
+- #1384 / #1393: native cleaning profile bindings and company-worker mapping. #1393 is
+  still a suggest-only draft; neither profile metadata nor adapter plans populate this
+  live roster, publish skill proof or grant capabilities, tools or autonomy.
 - #302 / #1183: the shared resolver, signed-credential verification and durable
   current-company session path are published in current main; #1240 adds the company
   placement/storage contract. Regression coverage is code evidence only. Verified

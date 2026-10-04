@@ -1,4 +1,5 @@
-import type { createSessionCredentialService, AuthenticatedSessionCredential } from './security-boundary.js';
+import type { AuthenticatedSessionCredential, createSessionCredentialService,
+  DirectAdminBootstrapProofEnvelope, DirectAdminLoginAssertionInput, DirectAdminLoginAssertionProvider } from './security-boundary.js';
 import type { DirectAdminRole } from './directadmin-plugin.js';
 
 /** Trusted host composition supplies the canonical #302 credential service.
@@ -79,14 +80,10 @@ function encode(value: Uint8Array): string {
 async function csrfDigest(value: string): Promise<string> {
   return encode(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))));
 }
-export type DirectAdminBootstrapInput = Readonly<{
-  login_assertion: string; company_id: string; device_id: string; csrf_token: string;
-}>;
-/** Allowlisted ambient proof envelope passed to the trusted server-only
- * DirectAdmin assertion provider after the browser boundary checks succeed. */
-export type DirectAdminBootstrapRequestProof = Readonly<{
-  origin: string; cookie: string | null; authorization: string | null; csrf_nonce: string;
-}>;
+/** Identity contract aliases come from canonical #302; the SDK adds only its
+ * browser/session boundary and never creates a second bootstrap assertion. */
+export type DirectAdminBootstrapInput = DirectAdminLoginAssertionInput;
+export type DirectAdminBootstrapRequestProof = DirectAdminBootstrapProofEnvelope;
 function validBootstrapInput(value: unknown): value is DirectAdminBootstrapInput {
   try {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -229,7 +226,7 @@ export class DirectAdminSessionBridge {
    */
   async bootstrapBrowserSession(
     request: Request,
-    resolveInput: (proof: DirectAdminBootstrapRequestProof) => Promise<unknown>,
+    bootstrapProvider: DirectAdminLoginAssertionProvider | undefined,
   ): Promise<Readonly<{ set_cookie: string; csrf_token: string }>> {
     let url: URL;
     try { url = new URL(request.url); } catch { return rejectRequest(); }
@@ -239,10 +236,11 @@ export class DirectAdminSessionBridge {
         url.search || url.hash || request.headers.get('origin') !== this.#config.origin ||
         request.headers.get('sec-fetch-site') !== 'same-origin' || request.headers.has('content-encoding') ||
         (contentLength !== null && !/^0+$/.test(contentLength)) ||
-        !/^[A-Za-z0-9_-]{43,128}$/.test(csrfNonce) || typeof resolveInput !== 'function') {
+        !/^[A-Za-z0-9_-]{43,128}$/.test(csrfNonce)) {
       return rejectRequest();
     }
     if (!await hasEmptyBody(request)) return rejectRequest();
+    if (!bootstrapProvider || typeof bootstrapProvider.provide !== 'function') return unavailable();
 
     // Origin, Fetch Metadata, the empty request body and nonce syntax are
     // checked before canonical identity reads or the trusted provider run.
@@ -279,7 +277,7 @@ export class DirectAdminSessionBridge {
       csrf_nonce: csrfNonce,
     });
     let input: unknown;
-    try { input = await resolveInput(proof); }
+    try { input = await bootstrapProvider.provide(proof); }
     catch (error) { return bootstrapFailureFor(error, staleCookie); }
     if (!validBootstrapInput(input)) return rejectRequest();
 

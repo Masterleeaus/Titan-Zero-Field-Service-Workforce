@@ -95,6 +95,7 @@ export async function fixture(t, { origin = ORIGIN, provider = external.provider
     requestIntent: async (_plugin, intent, context, revalidate) => {
       const latest = await revalidate(); effects.push({ intent, context: latest }); return { receipt_id: 'receipt-1' };
     },
+    receipt: async () => null,
   };
   return { storage, registry, sessions, bridgeSessions, workforceVerifier, workforceKeys, policy, upstreamToken, upstreamKeys,
     loginFor, bridge, request, token, claims, sign, owners, effects, now, setClock: value => { clock = value; } };

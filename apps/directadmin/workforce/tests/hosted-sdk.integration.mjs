@@ -93,7 +93,7 @@ test('current SDK, canonical issued session and company-switch cookie scope the 
   assert.equal(intents[0].input.action, 'pause');
   assert.equal(intents[0].operation_id.length > 0, true);
   assert.equal(intents[0].correlation_id.length > 0, true);
-  assert.equal(controller.state.receipt.state, 'REQUESTED');
+  assert.equal(controller.state.receipt?.state, 'REQUESTED', JSON.stringify(controller.state));
   assert.equal(controller.state.receipt.evidence_refs.length, 0);
 
   await controller.submit({ action: 'cancel', work_id: 'company-a-work', reason: 'Fixture cancellation request' });

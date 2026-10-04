@@ -362,3 +362,158 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium \
 --import /workspace/Titan-Zero-Field-Service-Workforce/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx/dist/loader.mjs \
 apps/directadmin/workforce/tests/relay-host.integration.mjs
 ```
+
+## Cleaning-first continuation — current main 9fd2e4e8 (2026-10-02)
+
+This continuation stays on the existing `agent/issue-1050` claim. It normally
+merged current main through branch merge `732832e0`; no second claim, force push,
+owner change or production action was made. The consumer package source is
+`6b4658457973f2260b22c77f1f6e365966920802`, version 0.1.6. The upstream
+ownership history above remains intact.
+
+The default page is now cleaner-team-first. It groups only the current
+company-filtered Workforce roster, shows canonical hosted work, and opens the
+existing governed action form only for the exact host-published reassignment
+descriptor. The form remains explicit review; the owner rechecks company,
+authority, fresh approval, READY state, target capabilities and assignee CAS.
+Receipts remain `REQUESTED`; accepted evidence appears only from canonical
+refresh. The skills view consumes the SDK's versioned company/context-bound
+canonical proof projection and never makes an assignment or authority decision.
+The controller additionally fails closed if displayed nested rows, summaries or
+evidence do not match canonical flat rows and current roster members. There is
+no plugin-local roster, proof, worker profile, persistence, identity, runtime or
+authority state.
+
+Generic hosted WorkItems still lack cleaning service, site, area checklist,
+supplies and visit time; the view labels these unavailable rather than calling
+a generic item a cleaning visit. The open draft #1393 binds six cleaning profile
+responsibilities to existing adapters for suggest-only plans and lists ten as
+unavailable. It does not publish current-company worker/skill/team bindings and
+uses the legacy web session/database, so this consumer does not use it as
+DirectAdmin-hosted truth. #1384, #1372 and the #811 runtime composition remain
+the respective worker/profile, proof-source and hosted-owner dependencies.
+
+Independent read-only review found two malformed-skill projection gaps: a nested
+proof could diverge from the canonical flat proof and malformed summary/evidence
+fields could crash the Skills view. The controller now validates all rendered
+rows, exact worker/capability identity agreement, company roster membership,
+authority-neutral flags, evidence list types and displayed summary consistency;
+adversarial controller cases cover each condition. Follow-up review found no
+remaining actionable security finding.
+
+Verification on Node v22.23.3:
+
+- `node --test apps/directadmin/workforce/tests/*.test.mjs`: **50/50 passed**.
+- With the current-main SDK bundle SHA256
+  `29a69a397692d142f25e47ba41e8c97de7eb193d6ea1ace0c24ca970cfb6d5db`, the
+  hosted-SDK and package-contract integration command passed **6/6**, including
+  real #302 signed fixture issuance, company switching/revocation and Chromium
+  package lifecycle behavior.
+- The actual SQLite owner E2E passed **8/8** using the exact older compatible
+  #1252/#1253 source pair `aff11521` / `f6710e9d` with this consumer package
+  source. It verifies authority denial, assignee CAS, evidence lineage,
+  idempotent replay, pre-submit abort and company isolation. It also
+  characterizes the existing post-commit cancellation defect: state/event
+  committed, ledger evidence is `UNCERTAIN`, but the owner returns 403 and replay
+  returns 503 without a second effect. This is not accepted behavior.
+- Current published #1252 head `31e57e11` requires #302's
+  `DirectAdminSessionBridge.bootstrapBrowserSession`; current #1253 head
+  `b969acfe` does not contain that method. The direct owner run remains pinned to
+  the older compatible pair until the owner branch is reconciled with the new
+  bootstrap route.
+- The current-main v0.1.6 package was rebuilt twice byte-identically. Its 19-file
+  archive SHA256 is recorded in
+  [WORKFORCE-PACKAGE-VERIFICATION.md](WORKFORCE-PACKAGE-VERIFICATION.md). The
+  checksum, extraction and staged install/update/uninstall preflight passed;
+  they do not certify a live DirectAdmin/Apache install.
+
+Current-main hosted projection still defaults to `controls: []` where no
+management grant is present, and the #812 production relay remains disabled
+until a real cookie boundary is commissioned. Verified upstream credentials,
+protected identity provisioning, trusted DirectAdmin bootstrap, the latest
+#1252/#1253 source reconciliation, positive current-main governed action,
+conversation transport, real-host installation and the remaining #1050 mission
+criteria remain outstanding. Keep #1050 open.
+
+## Historical browser-bootstrap continuation — main 99271ea4 (2026-10-03)
+
+This is a continuation of the existing #1050 claim and `agent/issue-1050`
+history. The branch normally merged current main `99271ea4` in merge
+`91ffb77a`; no remote `agent/issue-1050` ref or active same-branch worker was
+present at inspection. Earlier #1143, accepted #1145 and merged #1260 history
+remains intact. #1050 stays open.
+
+The browser now consumes the #1300 role-local nonce/bootstrap RAW contract:
+same-origin POSTs use only
+`?headers_to_env=yes&pipe_post=yes`, an empty body, and no content type. The
+browser never reads or forwards DA or Titan cookies. Only the exact SDK
+`POST /v1/directadmin/bootstrap` request maps to the role-local bootstrap RAW
+route; every other SDK request continues through #812's fixed relay helper.
+Nonce and session state remain in memory and in the SDK's HttpOnly cookie.
+
+Independent review found two reconnect races and their fixes are now covered by
+the browser/SDK integration: a late bootstrap response cannot clear a newer
+invalidation flag, and a nonce response completing after invalidation cannot
+fall through to the SDK's retained CSRF token. The tests hold each RAW response,
+invalidate the shared session, verify that no old company state returns, then
+verify that an explicit retry obtains a new nonce/bootstrap. Company changes,
+revocation, expiry, logout, action denial, and stale receipts continue to clear
+or revalidate company-scoped state. The follow-up security review found no
+remaining actionable issue in this bounded browser boundary.
+
+Verification used Node v22.23.3, the SDK source from main `99271ea4` (bundle
+SHA256 `9f28ab5ea84aaa6015f8cbf0a5fe399a791924c52edb2689d7eeb824f2a2d408`),
+Chromium, and disposable identity/company fixtures:
+
+- App/browser/package, hosted SDK, and controlled #302/#1049 session contract:
+  **57/57 passed**.
+- Extracted Workforce package + Server Node relay + current #811 hosted source:
+  **14 relay requests / 15 hosted routes**. Verified the production default
+  returns `503 cookie_boundary_unverified` without upstream traffic; the
+  in-process test-only loader then exercised read-only Company A and B,
+  evidence, empty controls, invalid-CSRF denial, governed-action denial with no
+  work/event effects, and upstream expiry.
+- Two deterministic v0.1.6 builds were byte-identical. The 19-file archive
+  SHA256 is `89c2e2cffa5e58a98d1e51244dbd10ea1883e551aadddb52a41b1221a0e04974`.
+  Independent extraction, checksum, executable role entrypoints and staged
+  install/update/uninstall preflight passed. The candidate currently excludes
+  #1395 RAW handler files and is not ready to install.
+
+At that earlier 99271ea4 checkpoint, the extracted RAW tests used a synthetic
+cookie jar/upstream; they did not launch
+#1395's scripts, a DirectAdmin CGI process, Apache, or a live host. PR #1395
+was draft and its SQLite-backed host tests were blocked by missing
+`better_sqlite3.node`. #812 production forwarding remains disabled pending a
+verified real cookie boundary. Protected identity provisioning and upstream
+credentials are not commissioned; #811 currently exposes no control without a
+current grant, so this run proves denial and read-only projection, not a
+positive governed action. The broader conversation and Workforce mission
+criteria remain open.
+
+## Coordinated packaged-browser continuation — main ee3e61da / #1395 head 914c0e1b (2026-10-03)
+
+The existing #1050 continuation normally merged the exact current #1395 branch
+head, including its workflow-only follow-up; no RAW/package owner files were
+overwritten. Main then advanced to `ee3e61da` with marketing-only changes. The
+current 26-file v0.1.6 artifact and checksum are recorded in
+`WORKFORCE-PACKAGE-VERIFICATION.md`.
+
+The new Chromium scenario runs the extracted package's User RAW scripts and
+adapter through initial authentication, invalidation races, retry, a controlled
+company-context event, reload, logout, expiry and read-only presentation. It
+requires current-session forwarding and replacement-cookie rotation on renewals,
+checks the browser cookie jar and verifies that private nonce forwarding removes
+the Titan cookie. It does not execute the Admin/Reseller browser routes, test the
+DirectAdmin shebang/OS CGI environment, or prove #302/#811 identity and authority
+with production services. Company A/B, hosted endpoints and intent receipts are
+controlled fixtures.
+
+Node v22.23.3 verification on this continuation: consumer/browser/package
+**60/60**, portfolio/package/RAW contracts **20/20**, packaged RAW-to-#302/#1049
+session chain **3/3**. The current #1395 head's hosted package, source-index,
+SQLite composition/build, Workforce, canonical-environment, mission-evidence
+and slice checks pass; conditional/unrelated jobs are skipped. #1395 and #1405
+remain draft. No production deployment, credentials or security configuration
+changes were made. Live protected provisioning, verified upstream credentials,
+commissioned cookie isolation, and a real DirectAdmin install/reload journey
+remain unproved. #1050 stays open.

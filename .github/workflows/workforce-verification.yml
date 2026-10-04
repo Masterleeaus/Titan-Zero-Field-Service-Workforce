@@ -31,6 +31,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: "Run #1300 cleaning-company session-chain cases (3)"
+        id: session_chain_3
+        run: pnpm --filter @titan-zero/workforce exec tsx --tsconfig ../../apps/web/tsconfig.json --test ../../apps/directadmin/workforce/tests/bootstrap-session-chain.integration.mjs
+      - name: Run six Workforce production dependency cases
+        if: "${{ always() && !cancelled() && steps.session_chain_3.outcome != 'skipped' }}"
+        run: pnpm --filter @titan-zero/workforce exec tsx --tsconfig ../../apps/web/tsconfig.json --test src/production-dependencies.test.ts
       - run: pnpm --filter @titan-zero/workforce typecheck
       - run: pnpm --filter @titan-zero/workforce test
       - name: Focused company-native storage typecheck and tests

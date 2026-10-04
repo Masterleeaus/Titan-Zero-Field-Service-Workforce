@@ -7,6 +7,8 @@ import { createSqliteStorage, type StorageClient } from "../../../packages/stora
 import { SqliteWorkforceStore } from "./sqlite-store.js";
 import { createHostedRuntime, type HostedWorkforceDependencies } from "./hosted-runtime.js";
 import { createDirectAdminWorkforceOwners, type DirectAdminFetchHandler } from "./directadmin-workforce-owners.js";
+import { withDirectAdminBootstrapNonceRoute } from "./directadmin-bootstrap-nonce-route.js";
+import { directAdminSessionCookieHeader } from "../../../packages/titan-platform/src/security-session-credentials.js";
 import { handleConversationRequest, readConversationBody, writeConversationResponse, conversationHttpStatus } from "./conversation-api.js";
 
 // @ts-expect-error Canonical execution boundary is JavaScript.
@@ -54,11 +56,67 @@ function json(response: ServerResponse, status: number, body: unknown) {
 
 const directAdminForwardHeaders = ["cookie", "sec-fetch-site", "origin", "referer", "x-titan-csrf", "content-type", "content-encoding", "accept"] as const;
 const directAdminBootstrapForwardHeaders = ["x-titan-da-bootstrap-csrf"] as const;
+const directAdminSessionCookieName = "__Host-titan-da-session";
+const directAdminNoncePath = "/v1/directadmin/bootstrap-nonce";
+const directAdminBootstrapPath = "/v1/directadmin/bootstrap";
 function assertDirectAdminOrigin(value: string): void {
   try {
     const origin = new URL(value);
     if (origin.protocol !== "https:" || origin.origin !== value) throw new Error();
   } catch { throw new Error("workforce-directadmin-origin-invalid"); }
+}
+
+function canonicalDirectAdminSessionCookie(value: string | readonly string[] | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const header = typeof value === "string" ? value : value.join("; ");
+  if (header.length > 16_384 || /[\r\n\u0000]/.test(header)) return undefined;
+  const matching = header.split(";").map(part => part.trim())
+    .filter(part => part.slice(0, part.indexOf("=")).trim() === directAdminSessionCookieName);
+  if (matching.length !== 1) return undefined;
+  const separator = matching[0].indexOf("=");
+  const credential = matching[0].slice(separator + 1);
+  if (separator < 0 || !credential || credential.length > 16_384) return undefined;
+  return `${directAdminSessionCookieName}=${credential}`;
+}
+
+/** DirectAdmin proof is accepted only from the trusted RAW role-local routes.
+ * The generic #812 relay remains cookie-closed, and ordinary SDK requests keep
+ * receiving only the canonical Titan session cookie. */
+function canonicalDirectAdminProofCookies(
+  value: string | readonly string[] | undefined,
+  allowTitanSession: boolean,
+): string {
+  if (value === undefined) throw new Error("directadmin-bootstrap-cookie-invalid");
+  const header = typeof value === "string" ? value : value.join("; ");
+  if (!header || header.length > 16_384 || /[\r\n\u0000]/.test(header)) {
+    throw new Error("directadmin-bootstrap-cookie-invalid");
+  }
+  const seen = new Map<string, string>();
+  for (const raw of header.split(";")) {
+    const part = raw.trim();
+    const separator = part.indexOf("=");
+    if (!part || separator <= 0) throw new Error("directadmin-bootstrap-cookie-invalid");
+    const name = part.slice(0, separator);
+    const credential = part.slice(separator + 1);
+    if (!credential || seen.has(name) || !["session", "key", directAdminSessionCookieName].includes(name) ||
+        (name === directAdminSessionCookieName && !allowTitanSession)) {
+      throw new Error("directadmin-bootstrap-cookie-invalid");
+    }
+    seen.set(name, credential);
+  }
+  let directAdminCookie: string;
+  try {
+    directAdminCookie = directAdminSessionCookieHeader(
+      ["session", "key"].filter(name => seen.has(name)).map(name => `${name}=${seen.get(name)}`).join("; "),
+    );
+  } catch {
+    throw new Error("directadmin-bootstrap-cookie-invalid");
+  }
+  const titanCredential = seen.get(directAdminSessionCookieName);
+  if (titanCredential === undefined) return directAdminCookie;
+  const titanCookie = canonicalDirectAdminSessionCookie(`${directAdminSessionCookieName}=${titanCredential}`);
+  if (!titanCookie) throw new Error("directadmin-bootstrap-cookie-invalid");
+  return `${directAdminCookie}; ${titanCookie}`;
 }
 
 function directAdminRequest(request: import("node:http").IncomingMessage, publicOrigin: string, signal?: AbortSignal): Request {
@@ -74,12 +132,28 @@ function directAdminRequest(request: import("node:http").IncomingMessage, public
   const url = new URL(target, origin);
   if (url.origin !== publicOrigin) throw new Error("directadmin-origin-mismatch");
   const method = request.method ?? "GET";
-  const bootstrapRequest = method === "POST" && target === "/v1/directadmin/bootstrap";
+  const bootstrapRequest = method === "POST" && target === directAdminBootstrapPath;
+  const bootstrapNonceRequest = method === "POST" && target === directAdminNoncePath;
   const headers = new Headers();
-  for (const name of [...directAdminForwardHeaders, ...(bootstrapRequest ? directAdminBootstrapForwardHeaders : [])]) {
+  for (const name of directAdminForwardHeaders) {
+    if (name === "cookie") {
+      if (bootstrapNonceRequest || bootstrapRequest) {
+        headers.set("cookie", canonicalDirectAdminProofCookies(request.headers.cookie, bootstrapRequest));
+      } else {
+        // Existing-session routes receive only the Titan cookie. Unknown,
+        // duplicate and DirectAdmin cookies never cross this host boundary.
+        const cookie = canonicalDirectAdminSessionCookie(request.headers.cookie);
+        if (cookie) headers.set("cookie", cookie);
+      }
+      continue;
+    }
     const value = request.headers[name];
     if (typeof value === "string") headers.set(name, value);
-    else if (Array.isArray(value)) headers.set(name, name === "cookie" ? value.join("; ") : value.join(", "));
+    else if (Array.isArray(value)) headers.set(name, value.join(", "));
+  }
+  if (bootstrapRequest) {
+    const nonce = request.headers[directAdminBootstrapForwardHeaders[0]];
+    if (typeof nonce === "string") headers.set(directAdminBootstrapForwardHeaders[0], nonce);
   }
   const init: RequestInit & { duplex?: "half" } = { method, headers, redirect: "error", signal };
   if (method !== "GET" && method !== "HEAD") {
@@ -87,6 +161,41 @@ function directAdminRequest(request: import("node:http").IncomingMessage, public
     init.duplex = "half";
   }
   return new Request(url, init);
+}
+
+function clientDisconnectSignal(request: import("node:http").IncomingMessage, response: ServerResponse) {
+  const controller = new AbortController();
+  const abort = () => { if (!controller.signal.aborted) controller.abort(new Error("workforce-client-disconnected")); };
+  const onClose = () => { if (!response.writableFinished) abort(); };
+  request.once("aborted", abort);
+  request.once("error", abort);
+  response.once("close", onClose);
+  return {
+    signal: controller.signal,
+    dispose() {
+      request.removeListener("aborted", abort);
+      request.removeListener("error", abort);
+      response.removeListener("close", onClose);
+    },
+  };
+}
+
+function combineAbortSignals(signals: readonly AbortSignal[]) {
+  const controller = new AbortController();
+  const listeners: Array<Readonly<{ signal: AbortSignal; abort: () => void }>> = [];
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    const abort = () => { if (!controller.signal.aborted) controller.abort(signal.reason); };
+    signal.addEventListener("abort", abort, { once: true });
+    listeners.push({ signal, abort });
+  }
+  return {
+    signal: controller.signal,
+    dispose() { for (const listener of listeners) listener.signal.removeEventListener("abort", listener.abort); },
+  };
 }
 
 async function writeFetchResponse(response: ServerResponse, result: Response): Promise<void> {
@@ -135,8 +244,12 @@ export async function createWorkforceServer(options: WorkforceServerOptions = {}
       hosted = await createHostedRuntime(storage, identityStorage, dependencies, lifecycle.signal);
       if (dependencies.directAdmin) {
         const owners = createDirectAdminWorkforceOwners(hosted.runtime);
-        directAdmin = dependencies.directAdmin.createGateway(owners);
-        if (typeof directAdmin !== "function") throw new Error("workforce-directadmin-gateway-invalid");
+        const gateway = dependencies.directAdmin.createGateway(owners);
+        if (typeof gateway !== "function") throw new Error("workforce-directadmin-gateway-invalid");
+        directAdmin = withDirectAdminBootstrapNonceRoute(gateway, {
+          publicOrigin: dependencies.directAdmin.publicOrigin,
+          flow: dependencies.directAdmin.bootstrapNonceFlow,
+        });
       }
     }
   } catch (error) {
@@ -186,19 +299,26 @@ export async function createWorkforceServer(options: WorkforceServerOptions = {}
         if (!directAdmin || !dependencies?.directAdmin) {
           json(response, 503, { error: "directadmin-gateway-not-configured", read_only: true }); return;
         }
+        const disconnected = clientDisconnectSignal(request, response);
+        const signals = combineAbortSignals([lifecycle.signal, disconnected.signal]);
         try {
           const gatewayResponse = await boundedAdapterCall((signal: AbortSignal) =>
             directAdmin(directAdminRequest(request, dependencies.directAdmin!.publicOrigin, signal)), {
-              timeoutMs: dependencies.adapterTimeoutMs ?? 30_000, signal: lifecycle.signal,
+              timeoutMs: dependencies.adapterTimeoutMs ?? 30_000, signal: signals.signal,
             });
           await writeFetchResponse(response, gatewayResponse);
         } catch (error) {
           const invalidTarget = error instanceof Error && error.message === "directadmin-request-target-invalid";
           const invalidOrigin = error instanceof Error && error.message === "directadmin-origin-mismatch";
-          json(response, invalidTarget || invalidOrigin ? 400 : 503, {
-            error: invalidTarget ? "directadmin-request-target-invalid" : invalidOrigin ? "directadmin-origin-mismatch" : "directadmin-gateway-unavailable",
+          const invalidBootstrapCookie = error instanceof Error && error.message === "directadmin-bootstrap-cookie-invalid";
+          json(response, invalidTarget || invalidOrigin || invalidBootstrapCookie ? 400 : 503, {
+            error: invalidTarget ? "directadmin-request-target-invalid" : invalidOrigin ? "directadmin-origin-mismatch"
+              : invalidBootstrapCookie ? "directadmin-bootstrap-cookie-invalid" : "directadmin-gateway-unavailable",
             read_only: true,
           });
+        } finally {
+          signals.dispose();
+          disconnected.dispose();
         }
         return;
       }

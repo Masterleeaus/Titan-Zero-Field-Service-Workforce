@@ -135,10 +135,15 @@ test("portfolio delegates Workforce packaging and pins its exact Server Node dep
   assert.ok(workforce);
   assert.ok(titanWeb);
   assert.ok(serverNode);
-  assert.equal(workforce.version, "0.1.5");
+  assert.equal(workforce.version, "0.1.6");
   assert.equal(path.basename(workforce.archive), "titan_workforce.tar.gz");
   assert.equal(workforce.archive_filename, "titan_workforce.tar.gz");
   assert.equal(fs.readFileSync(workforce.archive).length > 0, true);
+  const workforceManifest = spawnSync("tar", ["-xOzf", workforce.archive, "plugin.conf"], { encoding: "utf8" });
+  assert.equal(workforceManifest.status, 0, workforceManifest.stderr);
+  const packagedWorkforceVersion = workforceManifest.stdout.match(/^version=(.+)$/m)?.[1];
+  assert.equal(packagedWorkforceVersion, "0.1.6", "Workforce archive must contain the pinned release version");
+  assert.equal(packagedWorkforceVersion, workforce.version, "portfolio version must match the packaged Workforce manifest");
   assert.equal(fs.readFileSync(`${workforce.archive}.sha256`, "utf8"), `${workforce.sha256}  titan_workforce.tar.gz\n`);
   assert.equal(titanWeb.version, "0.1.0");
   assert.equal(path.basename(titanWeb.archive), "titan_web.tar.gz");

@@ -2,17 +2,14 @@
 
 This checklist verifies a **packaging candidate** in a local workspace or disposable staging directory. The archive is **not live-install-ready** and this checklist does not authorize copying it into DirectAdmin, enabling the plugin, creating credentials or changing a host.
 
-The v0.1.4 record and the first v0.1.5 hashes below are historical candidates.
-The latest v0.1.5 candidate uses app sources on the canonical `agent/issue-1050`
-branch and current main `64561e4d077ec07a3cb40dfb43284b0e7dff4dbf` after #1247
-merged. The DirectAdmin SDK and hosted Workforce/relay owner sources are unchanged
-from the previously tested `bfbb06a5` baseline. The DirectAdmin SDK source tree is
-unchanged from `8c1161f2` and includes #1243 session behavior. Current-source
-results and hashes are at the end.
+The v0.1.4, v0.1.5 and earlier 19-file v0.1.6 records below are historical
+candidates. The latest coordinated v0.1.6 candidate and its 26-file archive
+evidence are recorded in the final section. None of these staged checks
+certifies a live DirectAdmin/Apache install.
 
 ## Build the SDK and package
 
-For the current candidate, use the exact canonical SDK source from main
+For the historical v0.1.5 candidate, use the exact canonical SDK source from main
 `64561e4d077ec07a3cb40dfb43284b0e7dff4dbf` (including #1243 session replacement
 and registry-outage handling). Its DirectAdmin SDK paths are unchanged from
 `bfbb06a5`. No shared SDK implementation is copied into the Workforce source.
@@ -43,9 +40,9 @@ sha256sum /tmp/1050-package-candidate/titan_workforce.tar.gz
 cat /tmp/1050-package-candidate/titan_workforce.tar.gz.sha256
 ```
 
-The builder rejects symlinks, requires canonical browser session and package-validator exports, includes an explicit 19-file allowlist, writes normalized ownership/time/modes, extracts and compares the result, invokes the shared SDK package validator and runs the install preflight in a temporary staging copy.
+The builder rejects symlinks, requires canonical browser session and package-validator exports, includes an explicit allowlist (26 files after the #1395 RAW integration), writes normalized ownership/time/modes, extracts and compares the result, invokes the shared SDK package validator and runs the install preflight in a temporary staging copy.
 
-## Verify the final archive independently
+## Historical 19-file candidate — independent archive check
 
 ```sh
 set -eu
@@ -321,3 +318,313 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium \
   --import /workspace/Titan-Zero-Field-Service-Workforce/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx/dist/loader.mjs \
   apps/directadmin/workforce/tests/relay-host.integration.mjs
 ```
+
+## Latest current-source v0.1.6 candidate — main 9fd2e4e8 (2026-10-02)
+
+The canonical `agent/issue-1050` branch normally merged main `9fd2e4e8` in
+`732832e0`. The package source commit is
+`6b4658457973f2260b22c77f1f6e365966920802`. The shared SDK was compiled from
+that exact main source with Node v22.23.3 and esbuild 0.27.3; its bundled module
+SHA256 is `29a69a397692d142f25e47ba41e8c97de7eb193d6ea1ace0c24ca970cfb6d5db`.
+
+Two builds of the 19-file v0.1.6 candidate were byte-identical. Archive SHA256:
+`0587796777946fac81e63ed79cbecc32ffc19c1dfa454cf39149d10f5e6da51e`. Its
+sidecar matched. Independent extraction verified the 19-file count and v0.1.6
+manifest; staged install/update/uninstall scripts passed, with uninstall
+preserving hosted Workforce and business state. These are disposable staging
+checks and do not modify a DirectAdmin host.
+
+On the current-main SDK bundle, the bounded app/browser/package suite passed
+**50/50**, and `sdk-contract.integration.mjs` plus
+`hosted-sdk.integration.mjs` passed **6/6**. The latter uses the actual #302
+signed fixture issuer/registry and session bridge with controlled projection
+and action owners; it does not certify a hosted production endpoint.
+
+The direct SQLite owner integration passed **8/8** against this consumer source
+and the exact source-compatible older pair: #1253 owner `f6710e9d`, #1252 SDK
+`aff11521`. It emitted a separate 19-file v0.1.6 archive with that older SDK,
+SHA256 `e3dcfac8a16dfb4d2d30c53d10aaf8523c6fecdffae761b9d27debd1555aa201`.
+That run covers real SQLite authority, reassign CAS, evidence lineage, replay,
+revocation, cancellation and company switching, while recording the owner's
+post-commit cancellation misclassification as a defect. The currently published
+#1252 head `31e57e11` requires the current #302 browser-bootstrap method that is
+absent from current #1253 head `b969acfe`; do not describe the older direct-owner
+run as proof of those latest PR heads working together. The direct owner source
+must be reconciled with the bootstrap contract.
+
+No production identity, protected credential, relay configuration, host
+security setting or server was changed. Main's hosted owner currently publishes
+`controls: []` absent a grant, and #812's RAW production default remains disabled
+until a cookie boundary is verified on a real disposable DirectAdmin/Apache
+host. #1050 remains partial and open.
+
+Exact current-main SDK/package rebuild commands:
+
+```sh
+node_modules/.pnpm/esbuild@0.27.3/node_modules/esbuild/bin/esbuild \
+  packages/titan-platform/src/directadmin-plugin.ts \
+  --bundle --format=esm --platform=browser --target=es2022 --minify \
+  --outfile=/tmp/1050-sdk-main-9fd.mjs
+
+node apps/directadmin/workforce/tools/package.mjs \
+  --sdk-module /tmp/1050-sdk-main-9fd.mjs \
+  --output-dir /tmp/1050-package-v0.1.6
+
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium \
+TITAN_COCKPIT_SDK_MODULE=/tmp/1050-sdk-main-9fd.mjs \
+  node --test apps/directadmin/workforce/tests/*.test.mjs \
+  apps/directadmin/workforce/tests/sdk-contract.integration.mjs \
+  apps/directadmin/workforce/tests/hosted-sdk.integration.mjs
+```
+
+## Historical consumer candidate — main 99271ea4 (2026-10-03)
+
+The consumer source is on the existing `agent/issue-1050` continuation after
+merge `91ffb77a`. The #1049 SDK source in main `99271ea4` is unchanged in this
+slice. Built with Node v22.23.3 and esbuild 0.27.3 from the checkout root, its
+bundle SHA256 is
+`9f28ab5ea84aaa6015f8cbf0a5fe399a791924c52edb2689d7eeb824f2a2d408`.
+
+The v0.1.6 candidate archive is available in the task workspace at
+`/workspace/.tmp-1050-workforce/package-v0.1.6-main992-final/titan_workforce.tar.gz`.
+It contains 19 allowlisted files and has SHA256
+`89c2e2cffa5e58a98d1e51244dbd10ea1883e551aadddb52a41b1221a0e04974`; two
+fresh builds were byte-identical and the sidecar matched. Independent
+extraction verified the file count, manifest, executable role indexes, and
+staged install/update/uninstall preflight. Uninstall preserves hosted Workforce
+and company business state. A separate archive listing check confirmed the
+candidate does not include `bootstrap-nonce.raw`, `bootstrap.raw`, or the
+#1300 RAW adapter module, which are still owned by draft PR #1395.
+
+The app/browser/package, current-main SDK contract and controlled identity
+fixture suite passed **57/57** on this bundle. The extracted current-main relay
+run passed **14 relay requests / 15 hosted routes**, covering the disabled
+production default, two-company read-only projection/evidence, invalid-CSRF
+and hosted authority denials without work/event effects, and expiry clearing.
+The fixtures do not simulate production identity or prove live cookie isolation.
+
+Rebuild from a clean checkout of this branch:
+
+```sh
+node_modules/.pnpm/esbuild@0.27.3/node_modules/esbuild/bin/esbuild \
+  packages/titan-platform/src/directadmin-plugin.ts \
+  --bundle --format=esm --platform=browser --target=es2022 \
+  --outfile=/tmp/1050-sdk-main-99271ea4.mjs
+
+node apps/directadmin/workforce/tools/package.mjs \
+  --source-dir apps/directadmin/workforce \
+  --sdk-module /tmp/1050-sdk-main-99271ea4.mjs \
+  --output-dir /tmp/1050-package-v0.1.6-main-99271ea4
+```
+
+For this historical 99271ea4 candidate, the consumer expected the role RAW
+routes but that archive did not contain them; #1395's contract was integrated
+later in the coordinated continuation below.
+Do not install the archive on DirectAdmin. #812's production relay remains
+disabled with `503 cookie_boundary_unverified`; live DirectAdmin/Apache cookie
+isolation, #1395's blocked native database suites, protected identity
+provisioning, and positive hosted controls remain outstanding.
+
+## Coordinated packaged RAW and cockpit continuation — current main ee3e61da (2026-10-03)
+
+This remains on the existing `agent/issue-1050` branch and open draft PR #1405.
+The branch includes normal merges of exact current #1395 head
+`914c0e1b0ec19277ea7f965b0ef31f6426f6646b` and current main `ee3e61da`; the
+#1395 source-owned RAW/package files were preserved. Main's advance from
+`d2d76ce6` touched marketing paths only; the DirectAdmin SDK source used below
+is unchanged. No deployment, production credential, or security-setting change
+was made.
+
+Two builds of the current v0.1.6 candidate were byte-identical. The archive is
+available at
+`/workspace/.tmp-1050-workforce/package-v0.1.6-integrated-a/titan_workforce.tar.gz`,
+contains 26 files, and has SHA256
+`100ecd5c58d6de7f0cfb02636d58440ae05751293047d5cdce6bd61bcf556b26`. Its
+sidecar matched. Independent extraction confirmed `plugin.conf` version 0.1.6,
+the three role pages, all six executable RAW scripts at mode 0755, the shared
+RAW adapter and successful staged install/update/uninstall preflight. The
+portfolio's strict manifest/archive-version test now pins 0.1.6 and compares the
+version embedded in the actual archive; it no longer incorrectly expects
+0.1.5.
+
+The browser integration builds and extracts the real package, serves its User
+page and invokes the extracted `user/bootstrap-nonce.raw` and
+`user/bootstrap.raw` through the packaged adapter. It covers initial bootstrap,
+late-response invalidation, retry, company-context change, page lifecycle,
+reload, logout, expiry, read-only controls and receipt correlation restoration.
+On `pagehide`, the controller drops rendered company and receipt data while
+retaining only the opaque tab-scoped receipt pointer. A resumed or reloaded page
+must fetch a new host context, match its company and actor, then ask the shared
+receipt reader again. Normal logout, expiry, revocation and company/actor changes
+still clear the pointer. Assertions now
+require each tested renewal to forward the previous host cookie, issue a unique
+replacement, and update the browser cookie jar. The nonce route is required to
+strip that browser-managed Titan cookie before private forwarding. The company
+switch itself is a controlled identity/context fixture event; it does not prove
+the real #302 selected-company assertion or #811 hosted authorization flow. The
+child process runs the extracted script with Node, so it does not certify the
+DirectAdmin OS shebang/CGI invocation.
+
+Verification on Node v22.23.3, Chromium and the current-main SDK bundle
+(`7c08d37f6ea274760f8e52092b2e86a07a93ae175fe4a6216df9156d1fc39681`):
+
+- Workforce unit/browser/package and packaged cockpit consumer suite: **60/60**.
+- Portfolio/package/role RAW exact archive contracts: **20/20**.
+- Packaged RAW to the #302 assertion fixture and #1049 session bridge: **3/3**.
+- #1395 hosted CI on exact head `914c0e1b`: package, source-index,
+  sqlite-compose-and-build, workforce, canonical-environment, mission evidence
+  and slice checks passed; unrelated/conditional jobs were skipped.
+
+The browser host, selected company and governed action responses are controlled
+fixtures, not production data. This run proves packaged consumer protocol and
+lifecycle behavior, not real identity binding, owner authorization, protected
+provisioning, or a production positive control. #812's production relay remains
+disabled pending verified cookie isolation on an authorized disposable host;
+upstream credentials/protected provisioning and a real DirectAdmin install are
+still uncommissioned. #1395 and #1405 remain drafts, and #1050 stays open for
+its remaining acceptance criteria.
+
+### Canonical company and revocation regression — 2026-10-03
+
+The focused packaged RAW session-chain test now uses the shared
+`directadmin-bridge-fixture.mjs` SQLite identity registry and the canonical
+session credential service. It no longer creates a plugin-specific cleaning
+company or chooses a company from a DirectAdmin role/session response. That
+response remains a controlled `/api/session` identity projection fixture
+(subject and role only); the company/device tuple, binding, membership and
+revocation are all resolved through the canonical registry.
+
+The Admin, Reseller and User packaged nonce/bootstrap route pairs each reject
+the initially ambiguous two-company context. After the fixture revokes the
+second membership in the canonical store, all three pairs can issue only for
+`company-a` / `device-1`. The test also revokes that membership between nonce
+and bootstrap (no cookie or call to session issuance), verifies that the
+resulting credential cannot authenticate for another company, and revokes the
+membership again after issuance to prove both bridge context and nonce requests
+fail closed. Replaying that stale nonce after membership restoration remains
+denied, and changing the authenticated DirectAdmin role between nonce and
+bootstrap is also rejected. Host, Origin, injected role/company headers, cookie
+forwarding, `redirect: error`, `cache: no-store`, `credentials: omit`, and the
+absence of a company selector in the host session projection remain asserted.
+The bridge context explicitly carries `authority: not-carried`.
+
+Focused verification on Node v22.23.3:
+
+```sh
+TMPDIR=/workspace/.tmp-1050-workforce \
+  /tmp/1050-node22/node-v22.23.3-linux-x64/bin/node --test \
+  apps/directadmin/workforce/tests/bootstrap-session-chain.integration.mjs
+```
+
+Result: **3/3 passed**, including all three role routes. This is canonical-store
+integration coverage with a controlled DirectAdmin HTTP identity response; it
+does not certify protected production identity provisioning, a live DirectAdmin
+cookie boundary, or an installed production host.
+
+The complete Workforce consumer/browser/package/SDK/hosted suite was rerun after
+these additional assertions and passed **61/61** on the same Node/Chromium/SDK
+configuration.
+
+### Packaged RAW to canonical company-scoped hosted Workforce — 2026-10-03
+
+The updated `relay-host.integration.mjs` now drives the browser through the
+extracted package's actual User nonce and bootstrap RAW scripts. It removes the
+former test-only `panel.selectedCompany` bootstrap and uses the #302 bootstrap
+flow, the shared SQLite identity registry, the canonical session credential
+service, the #1049 session bridge and company-switch gateway, and the current
+#811 `createWorkforceServer`/Workforce owners with A/B company rows in one
+disposable SQLite Workforce store. This proves logical company filtering, not
+separate physical company database isolation. The `/api/session` endpoint is
+still a controlled DirectAdmin HTTP fixture. It accepts only the exact fixture
+DirectAdmin cookie pair, returns host user/role identity without a company
+selector, and asserts `redirect: error`, `cache: no-store`, omitted fetch
+credentials and no Authorization header. It does not validate real DirectAdmin
+credentials, upstream revocation or host-session expiry; the renewal scenario
+expires the Titan session while this host fixture remains valid.
+
+The canonical registry starts with only company A active, so the real packaged
+nonce route can issue the first session without an injected company. Activating
+B and switching through `/v1/directadmin/company` rotates the canonical
+session; the actual Workforce owner then returns only B's worker/work/evidence.
+That route is called through the extracted relay, then the host's
+`titan-context-changed` event is dispatched by the test; this does not exercise
+`DirectAdminCockpitSession.switchCompany()` or certify a user-visible company
+picker. This end-to-end browser journey executes the User role only; Admin and
+Reseller nonce/bootstrap, renewal, revocation and hostile-input paths are
+covered separately by the 4-case session-chain suite.
+With A and B active, a fresh packaged User nonce request from that browser page
+is denied as ambiguous while its existing canonical B session remains intact.
+After the fixture canonically revokes A, B is the unique binding and a full
+packaged reload/expiry-renewal succeeds. Revoking B clears the rendered company data and
+governed controls. The projection's controls remain empty; its governed action
+is denied by the actual #811 owner, and the test verifies no business/event
+writes. The production relay default remains an explicit `503
+cookie_boundary_unverified`; the test-only relay configuration is injected
+in-process and does not certify Apache/CGI cookie isolation.
+The extracted RAW child receives only its CGI inputs, `NODE_ENV`, the matching
+`TMPDIR`, and the private test port-file path; it does not inherit ambient
+developer or CI environment variables.
+
+Focused verification on Node v22.23.3 and Chromium:
+
+- `node --test apps/directadmin/workforce/tests/*.test.mjs apps/directadmin/workforce/tests/sdk-contract.integration.mjs apps/directadmin/workforce/tests/hosted-sdk.integration.mjs`: **61/61 passed**.
+- `node --test apps/directadmin/workforce/tests/bootstrap-session-chain.integration.mjs`: **4/4 passed** for Admin, Reseller, User, role/session renewal, canonical membership, revocation and hostile request rejection.
+- `node --import tsx --test apps/directadmin/workforce/tests/relay-host.integration.mjs`: **1/1 passed**, 15 relay requests and 21 hosted routes.
+- Shared DirectAdmin SDK/browser suite: **123/123 passed**.
+- Two fresh 26-file v0.1.6 package builds are byte-identical; SHA256 and sidecar: `100ecd5c58d6de7f0cfb02636d58440ae05751293047d5cdce6bd61bcf556b26`.
+
+These disposable tests prove the current local package-to-canonical-owner path,
+not production DirectAdmin `/api/session` provisioning, protected upstream
+credentials, multi-company selection during bootstrap, authorized hosted
+controls, or live install/update/rollback. Active A+B bootstrap intentionally
+fails closed because no trusted selected-company binding is provided to the
+nonce route. Real selection requires a canonical #302/#1049 host contract; this
+plugin does not invent one. #1050 remains open for the rest of its acceptance
+criteria and approved live-host commissioning.
+
+### Governed receipt consumer contract — 2026-10-03
+
+The #811 owner has a real governed reassignment intent: its positive owner
+tests run through current authority, the ExecutionGateway, observed
+company-scoped reread, durable idempotency and accepted evidence. The open
+draft #1440 implements and tests the read-only accepted-receipt projection, but
+its PR description confirms that the browser HTTP route is not mounted yet.
+Current main's DirectAdmin gateway returns only `202 REQUESTED` plus the receipt
+ID, and the company-scoped projection exposes only evidence references. It does
+not expose receipt verification details. The shared #1049 SDK also has no
+receipt read method on current main.
+
+The Workforce consumer accepts receipt detail only from the shared SDK method
+`session.receipt('titan_workforce', receipt_id)` with the `{context, receipt}`
+envelope. It validates the agreed typed receipt schema, company, actor, opaque
+session/context revisions, receipt and operation correlation, and rechecks the
+current session before and after the read. For the #1398/#1440 contract, the
+consumer requires `state: VERIFIED`, `verification_status: verified`, the fixed
+company-scoped reread method and exactly the receipt ID as evidence; only then
+does it map that owner shape into the cockpit's verified display model. An older
+SDK or host leaves the result at `REQUESTED`; work evidence references alone do
+not promote it. A generic host denial without a receipt is reported as unverified
+even after a canonical projection refresh, because #811 has demonstrated a
+post-commit 403 while execution evidence remains uncertain.
+
+The cockpit provides a receipt refresh action and a tab-scoped
+`sessionStorage` bookmark containing only company/actor IDs and receipt,
+operation, correlation and work IDs. Owner IDs retain the #811 printable-string
+bound; only the `receipt_id` used in the fixed SDK route uses the narrower
+route-safe character set. Reconnect rereads the host receipt under
+the newly authenticated context; it does not persist receipt payloads, evidence,
+credentials, or authority. Pagehide clears in-memory data but retains this
+pointer for a later same-tab reconnect/reload; a fresh host context must match
+its company and actor before the receipt is read. Other session invalidation,
+logout, expiry, revocation and company/actor changes clear the bookmark.
+Receipt polling or read failure preserves only
+the original `REQUESTED` acknowledgement and never replays the governed action.
+
+The #811 owner has adopted the exact missing host route and bounded response
+proposal recorded at [issue #811](https://github.com/Masterleeaus/Titan-Zero-Field-Service-Workforce/issues/811#issuecomment-5969454043);
+its endpoint implementation remains an assigned upstream task. The typed
+`session.receipt()` SDK read is coordinated with the active shared-SDK owner on
+[PR #1398](https://github.com/Masterleeaus/Titan-Zero-Field-Service-Workforce/pull/1398#issuecomment-5969455352)
+and is not on current main. Consumer-side detail/envelope tests use typed
+fixtures only; they do not claim the current host can return receipt details or
+certify a verified UI result end to end.

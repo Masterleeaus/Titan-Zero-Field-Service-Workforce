@@ -42,7 +42,7 @@ test("execution revalidates current authority and carries the superseding decisi
   executionGateway:{async execute(value){request=value;return {state:"VERIFIED",verified:true};}},
  });
  const decision={status:"approved",decision_id:"auth-1",canonical:canonical()};
- await gateway.execute({decision,capability:{name:"booking.create"},input:{amount:25},idempotency_key:"tool-1",company_id:"co-1",work_id:"work-1",agent_id:"worker-1",run_id:"run-1"});
+ await gateway.execute({decision,capability:{name:"booking.create"},input:{amount:25},idempotency_key:"tool-1",company_id:"co-1",actor_id:"actor-1",correlation_id:"correlation-1",work_id:"work-1",agent_id:"worker-1",run_id:"run-1"});
  assert.equal(evaluationInput.company_id,"co-1");
  assert.equal(evaluationInput.actor_id,"actor-1");
  assert.equal(evaluationInput.worker_type,"human");
@@ -51,11 +51,14 @@ test("execution revalidates current authority and carries the superseding decisi
  assert.equal(evaluationInput.supersedes_authority_decision_id,"auth-1");
  assert.equal(evaluationInput.execution_input.amount,25);
  assert.equal(request.company_id,"co-1");
+ assert.equal(request.actor_id,"actor-1");
+ assert.equal(request.correlation_id,"correlation-1");
  assert.match(request.decision_id,/^authority:run-1:tool-1:execute:/);
  assert.equal(request.supersedes_decision_id,"auth-1");
  assert.equal(request.authority.revalidated,true);
  assert.equal(request.risk.level,"medium");
  assert.equal(request.risk.source,"risk-engine");
+ await assert.rejects(()=>gateway.execute({decision,capability:{name:"booking.create"},input:{amount:25},idempotency_key:"tool-actor-mismatch",company_id:"co-1",actor_id:"untrusted-caller",correlation_id:"correlation-1",work_id:"work-1",agent_id:"worker-1",run_id:"run-1"}),/runtime-actor-mismatch/);
  await assert.rejects(()=>gateway.execute({decision,capability:{name:"booking.create"},input:{},idempotency_key:"tool-2",company_id:"co-2",work_id:"work-1",agent_id:"worker-1",run_id:"run-1"}),/company-mismatch/);
 });
 

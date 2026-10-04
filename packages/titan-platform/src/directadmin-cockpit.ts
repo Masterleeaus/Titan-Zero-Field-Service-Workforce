@@ -1,6 +1,6 @@
 import { directAdminContextRevisionAssertion, type DirectAdminBridgeContext } from './directadmin-session-bridge.js';
-import type { DirectAdminPluginId, DirectAdminProjection } from './directadmin-gateway.js';
-import { assertDirectAdminProjection } from './directadmin-gateway.js';
+import type { DirectAdminPluginId, DirectAdminProjection, DirectAdminWorkforceReceipt } from './directadmin-gateway.js';
+import { assertDirectAdminProjection, assertDirectAdminWorkforceReceipt, isDirectAdminWorkforceReceiptId } from './directadmin-gateway.js';
 import { assertDirectAdminWorkforceSkillsProjection } from './directadmin-workforce-skills.js';
 import type { DirectAdminApiFetch, GovernedIntentRequest } from './directadmin-plugin.js';
 
@@ -188,6 +188,29 @@ export class DirectAdminCockpitSession {
       }
     }
     return result.projection;
+  }
+  /** Read a canonical, already-verified Workforce receipt through the current
+   * DirectAdmin session. The receipt ID is only a lookup key, never authority. */
+  async receipt(plugin: 'titan_workforce', receipt_id: string): Promise<DirectAdminWorkforceReceipt> {
+    if ((plugin as string) !== 'titan_workforce' || !isDirectAdminWorkforceReceiptId(receipt_id)) {
+      throw new Error('directadmin-receipt-request-invalid');
+    }
+    const active = this.#context;
+    const epoch = this.#epoch;
+    if (!active || active.expires_at <= Date.now()) throw new Error('directadmin-session-not-initialized');
+    // The typed ID alphabet contains no path separators, escapes or URL query
+    // syntax; preserve canonical colon/dot identifiers as one fixed segment.
+    const value = await this.send(`/v1/directadmin/titan_workforce/receipts/${receipt_id}`);
+    if (this.#disposed || epoch !== this.#epoch) throw new Error('directadmin-context-invalidated');
+    if (!value || typeof value !== 'object' || Array.isArray(value) ||
+        Reflect.ownKeys(value).length !== 2 || !Object.hasOwn(value, 'context') || !Object.hasOwn(value, 'receipt')) {
+      throw new Error('directadmin-receipt-response-invalid');
+    }
+    const result = value as { context: DirectAdminBridgeContext; receipt: unknown };
+    const context = this.accept(result.context);
+    if (this.#disposed || epoch !== this.#epoch) throw new Error('directadmin-context-invalidated');
+    assertDirectAdminWorkforceReceipt(result.receipt, receipt_id, context.company_id);
+    return Object.freeze({ ...result.receipt, evidence_refs: Object.freeze([...result.receipt.evidence_refs]) });
   }
   async intent(plugin: DirectAdminPluginId, intent: GovernedIntentRequest): Promise<unknown> {
     const context = this.#context;

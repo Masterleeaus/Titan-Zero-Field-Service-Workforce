@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { WorkforceApi } from '../images/api.mjs';
-const context = { company_id: 'company-a', actor_id: 'actor-a', session_revision: 1, context_revision: 'ctx1' };
+const context = { company_id: 'company-a', actor_id: 'actor-a', session_revision: 1, context_revision: '[5,2]' };
 function fixture(controls = [{ action: 'pause', capability_id: 'canonical.pause' }], workers = [], work = []) {
   const calls = []; return { calls,
     connect: async () => context,
@@ -36,7 +36,7 @@ test('published read-only projection is displayed but cannot submit a lifecycle 
 });
 test('skills accessor preserves typed host proofs, supports older hosts and reloads after company context changes', async () => {
   const session = fixture();
-  const companyA = { schema: 'titan.directadmin.workforce-skills.v1', company_id: 'company-a', context_revision: 'ctx1',
+  const companyA = { schema: 'titan.directadmin.workforce-skills.v1', company_id: 'company-a', context_revision: context.context_revision,
     status: 'available', read_only: true, grants_authority: false, projection: { schema: 'titan.workforce.evidence-backed-skill-proof.v1' } };
   const companyBContext = { ...context, company_id: 'company-b', actor_id: 'actor-a', context_revision: 'ctx2' };
   const companyB = { ...companyA, company_id: 'company-b', context_revision: 'ctx2' };
@@ -151,10 +151,100 @@ test('unassigned READY work binds expected_assignee_id to null', async () => {
   assert.equal(intent[2].input.expected_assignee_id, null);
 });
 test('gateway response cannot promote request acknowledgement to verified or mismatch correlation', async () => {
-  for (const response of [{ status: 'VERIFIED', receipt_id: 'r', correlation_id: 'fixture-id' }, { status: 'REQUESTED', receipt_id: 'r', correlation_id: 'other' }]) {
+  for (const response of [
+    { status: 'VERIFIED', receipt_id: 'r', correlation_id: 'fixture-id' },
+    { status: 'REQUESTED', receipt_id: 'r', correlation_id: 'other' },
+    { status: 'REQUESTED', receipt_id: '../unsafe', correlation_id: 'fixture-id' },
+    { status: 'REQUESTED', receipt_id: 'header.payload.signature', correlation_id: 'fixture-id' },
+    { status: 'REQUESTED', receipt_id: `r${'x'.repeat(200)}`, correlation_id: 'fixture-id' },
+  ]) {
     const session = fixture(); session.intent = async () => response; const api = new WorkforceApi(session, () => 'fixture-id');
     await assert.rejects(api.control(context, { action: 'pause', work_id: 'w', reason: 'test' }), /receipt-invalid/);
   }
+});
+test('receipt consumer reads a company-bound typed owner receipt and reports only persisted verification', async () => {
+  const receipt = { schema: 'titan.directadmin.workforce-receipt.v1', company_id: 'company-a', receipt_id: 'receipt1',
+    operation_id: 'operation1', correlation_id: 'correlation1', work_id: 'work1', state: 'VERIFIED',
+    verification_status: 'verified', verification_method: 'company-scoped-workforce-reread-and-reassignment-event',
+    evidence_refs: ['receipt1'] };
+  const displayedReceipt = { schema: receipt.schema, company_id: receipt.company_id, receipt_id: receipt.receipt_id,
+    operation_id: receipt.operation_id, correlation_id: receipt.correlation_id, work_id: receipt.work_id,
+    state: receipt.state, verification: { status: 'VERIFIED',
+      method: 'company-scoped-workforce-reread-and-reassignment-event' }, evidence_refs: receipt.evidence_refs };
+  const session = fixture(); let reads = 0;
+  session.receipt = async (plugin, receiptId) => { reads++; assert.equal(plugin, 'titan_workforce'); assert.equal(receiptId, 'receipt1'); return receipt; };
+  const api = new WorkforceApi(session);
+  assert.deepEqual(await api.receipt(context, 'receipt1', { operation_id: 'operation1', correlation_id: 'correlation1', work_id: 'work1' }), displayedReceipt);
+  assert.equal(reads, 1);
+  assert.deepEqual(await api.receipt(context, 'receipt1'), displayedReceipt);
+  assert.equal(reads, 2, 'replay reads the same canonical receipt without a local receipt store');
+});
+test('receipt route ID stays path-safe while canonical receipt fields accept bounded Unicode IDs', async () => {
+  const receiptId = 'receipt-safe_123';
+  const operationId = 'operation/東京 "quoted"';
+  const correlationId = 'correlation:東京';
+  const workId = `work / 東京 "quoted" ${'x'.repeat(220)}`;
+  const receipt = { schema: 'titan.directadmin.workforce-receipt.v1', company_id: 'company-a', receipt_id: receiptId,
+    operation_id: operationId, correlation_id: correlationId, work_id: workId, state: 'VERIFIED',
+    verification_status: 'verified', verification_method: 'company-scoped-workforce-reread-and-reassignment-event',
+    evidence_refs: [receiptId] };
+  const session = fixture(); let reads = 0;
+  session.receipt = async (plugin, id) => { reads++; assert.equal(plugin, 'titan_workforce'); assert.equal(id, receiptId); return receipt; };
+  const api = new WorkforceApi(session);
+  const detail = await api.receipt(context, receiptId, { operation_id: operationId, correlation_id: correlationId, work_id: workId });
+  assert.ok(workId.length > 200);
+  assert.equal(detail.work_id, workId);
+  assert.equal(detail.operation_id, operationId);
+  assert.equal(detail.correlation_id, correlationId);
+  assert.equal(reads, 1);
+
+  for (const invalidReceiptId of ['../unsafe', '/receipt', 'receipt?query', 'receipt#fragment']) {
+    await assert.rejects(api.receipt(context, invalidReceiptId), /receipt-invalid/);
+  }
+  assert.equal(reads, 1, 'invalid route IDs are rejected before calling the shared SDK');
+});
+test('receipt lookup never infers verification from a reference and rejects stale or cross-company receipt data', async () => {
+  const good = { schema: 'titan.directadmin.workforce-receipt.v1', company_id: 'company-a', receipt_id: 'receipt1',
+    operation_id: 'operation1', correlation_id: 'correlation1', work_id: 'work1', state: 'VERIFIED',
+    verification_status: 'verified', verification_method: 'company-scoped-workforce-reread-and-reassignment-event',
+    evidence_refs: ['receipt1'] };
+  for (const value of [
+    { ...good, company_id: 'company-b' },
+    { ...good, state: 'REQUESTED' },
+    { ...good, verification_status: 'unverified' },
+    { ...good, verification_method: 'provider-ack' },
+    { ...good, evidence_refs: ['unrelated-work-reference'] },
+    { ...good, correlation_id: 'other' },
+    { receipt: good },
+    { context, receipt: good }, // The SDK owns the envelope and returns only its validated typed receipt.
+  ]) {
+    const session = fixture(); session.receipt = async () => value;
+    await assert.rejects(new WorkforceApi(session).receipt(context, 'receipt1', {
+      operation_id: 'operation1', correlation_id: 'correlation1', work_id: 'work1' }), /receipt|context-changed/);
+  }
+  const session = fixture(); let reads = 0; session.receipt = async () => { reads++; return good; };
+  session.connect = async () => ({ ...context, context_revision: 'changed' });
+  await assert.rejects(new WorkforceApi(session).receipt(context, 'receipt1'), /context-changed/);
+  assert.equal(reads, 0, 'stale context stops before the receipt endpoint');
+  const switched = fixture(); let connects = 0; switched.receipt = async () => good;
+  switched.connect = async () => ++connects === 1 ? context : { ...context, context_revision: 'changed-after-read' };
+  await assert.rejects(new WorkforceApi(switched).receipt(context, 'receipt1'), /context-changed/);
+  assert.equal(connects, 2, 'the consumer discards a receipt when context changes during the read');
+  const oldHostSession = fixture(); let oldHostContextReads = 0;
+  oldHostSession.connect = async () => { oldHostContextReads++; return context; };
+  const oldHost = new WorkforceApi(oldHostSession);
+  assert.equal(await oldHost.receipt(context, 'receipt1'), null, 'an older SDK cannot fabricate receipt details');
+  assert.equal(oldHostContextReads, 0, 'an unsupported receipt route does not make an unnecessary host request');
+  const largeContext = { ...context, context_revision: `[5,"${'x'.repeat(1024)}"]` };
+  const longRevisionHost = fixture(); longRevisionHost.connect = async () => largeContext;
+  longRevisionHost.receipt = async () => good;
+  assert.deepEqual(await new WorkforceApi(longRevisionHost).receipt(largeContext, 'receipt1'), {
+    schema: good.schema, company_id: good.company_id, receipt_id: good.receipt_id,
+    operation_id: good.operation_id, correlation_id: good.correlation_id, work_id: good.work_id,
+    state: good.state, verification: { status: 'VERIFIED', method: good.verification_method },
+    evidence_refs: good.evidence_refs,
+  },
+    'opaque canonical context revisions may use the shared SDK 4096-character bound');
 });
 test('cross-company or unversioned projection rejected', async () => {
   for (const projection of [{ company_id: 'company-b', data: { schema: 'titan.workforce-cockpit.v1' } }, { company_id: 'company-a', data: {} }]) {

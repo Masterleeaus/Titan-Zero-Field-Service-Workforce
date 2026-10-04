@@ -1,19 +1,22 @@
 # Workforce consumer to hosted-owner integration — #1050
 
-This evidence records a bounded consumer integration run against the exact open
-PR heads current at the time of execution. It is not a claim that those PRs are
+This evidence records a bounded consumer integration run against pinned
+source-compatible owner and SDK commits. It is not a claim that those PRs are
 merged, that the full hosted runtime is certified on `main`, or that #1050 is
-complete.
+complete. These owner/SDK pins are older than the currently published PR heads;
+the latest SDK and owner branches require a bridge/API reconciliation before they
+can be exercised together by this harness.
 
 ## Pinned source and artifact
 
 | Component | Source |
 |---|---|
-| Workforce cockpit and package source, #1260 / `agent/issue-1050` | `de61ce6362e308cf4eee9d10dabcac1bcae83610` |
+| Workforce cockpit and package source, `agent/issue-1050` | `6b4658457973f2260b22c77f1f6e365966920802` |
 | Workforce SQLite owner, #1253 / `agent/issue-640` | `f6710e9d723e47d5dbda035309f9b8cd1de0cf4e` |
 | Extracted owner source tree digest (sorted path, type, content; dependencies excluded) | `a998aa751d059de466b2dcefeb11e2282d19b67e4432e73b890f858da3fd67d1` |
 | Shared DirectAdmin SDK and gateway, #1252 / `agent/issue-1049` | `aff115212281fb555d0c7bc804635e88713f2ec5` |
 | Compiled, minified SDK bundle used by the test | SHA256 `f8ac44484b2285293cffe74903053d607414e12d3e6b428045ac42092ec84961` |
+| Extracted 19-file v0.1.6 package tree digest | `caa5c3f6b35294ed8c6304e4a5f20788041bccda01ea1286057edae5a2eb5ee1` |
 
 `tests/actual-owner.integration.mjs` requires all recorded source commits and
 checks the extracted package tree, owner tree, and compiled SDK bundle hashes
@@ -69,21 +72,17 @@ does not mark the behavior correct.
 
 ## Reproduction
 
-Run from a checkout with the repository's Node dependencies installed, Node
-22.23.3, and the three PR refs resolving to the pinned commits. If any PR has
-advanced, stop and update the evidence and pin deliberately instead of testing
-an unrecorded source combination.
+Run from a checkout with the repository's Node dependencies installed and Node
+22.23.3. Fetch the pinned commit objects directly; do not substitute moving PR
+heads.
 
 ```sh
 owner_head=f6710e9d723e47d5dbda035309f9b8cd1de0cf4e
 sdk_head=aff115212281fb555d0c7bc804635e88713f2ec5
-consumer_head=de61ce6362e308cf4eee9d10dabcac1bcae83610
-git fetch origin refs/pull/1260/head:refs/1050/pr-1260
-test "$(git rev-parse refs/1050/pr-1260)" = "$consumer_head"
-git fetch origin refs/pull/1253/head:refs/1050/pr-1253
-test "$(git rev-parse refs/1050/pr-1253)" = "$owner_head"
-git fetch origin refs/pull/1252/head:refs/1050/pr-1252
-test "$(git rev-parse refs/1050/pr-1252)" = "$sdk_head"
+consumer_head=6b4658457973f2260b22c77f1f6e365966920802
+git fetch origin "$owner_head"
+git fetch origin "$sdk_head"
+git fetch origin "$consumer_head"
 
 work_area=/tmp/1050-owner-e2e
 owner_root="$work_area/owner"
@@ -114,7 +113,7 @@ node "$consumer_root/apps/directadmin/workforce/tools/package.mjs" \
   --source-dir "$consumer_root/apps/directadmin/workforce" \
   --sdk-module "$sdk_module" --output-dir "$work_area/package-build"
 test "$(sha256sum "$work_area/package-build/titan_workforce.tar.gz" | cut -d' ' -f1)" = \
-  72cae867b1dc49fb1e9652daf5b896a280db05cdbcd9a605052f892c71fd095a
+  e3dcfac8a16dfb4d2d30c53d10aaf8523c6fecdffae761b9d27debd1555aa201
 tar --same-permissions -xzf "$work_area/package-build/titan_workforce.tar.gz" -C "$package_root"
 
 TITAN_WORKFORCE_OWNER_ROOT="$owner_root" \
@@ -139,8 +138,8 @@ node --test apps/directadmin/workforce/tests/api.test.mjs \
 ```
 
 The package candidate was also built with this SDK bundle. The archive contains
-19 files, its manifest version is `0.1.5`, and its SHA256 is
-`72cae867b1dc49fb1e9652daf5b896a280db05cdbcd9a605052f892c71fd095a`.
+19 files, its manifest version is `0.1.6`, and its SHA256 is
+`e3dcfac8a16dfb4d2d30c53d10aaf8523c6fecdffae761b9d27debd1555aa201`.
 The sidecar checksum and extracted package/staging preflight passed. This is
 package contract evidence; it does not replace installation and recovery tests
 on an authorized DirectAdmin host.
@@ -158,9 +157,25 @@ on an authorized DirectAdmin host.
   owner/bridge fixtures and is not a substitute for the actual-owner test.
 - The exact #1252 and #1253 sources are separate open draft branches. This
   disposable test composition proves the consumer contract against those
-  source heads; it does not establish a published `main` composition or live
-  runtime certification.
+  pinned older source commits; it does not establish a published `main`
+  composition or live runtime certification. The currently published #1252
+  head `31e57e11` requires the #302 one-time
+  `DirectAdminSessionBridge.bootstrapBrowserSession` route, but the current
+  #1253 head `b969acfe` does not include that bridge method. Rebase/reconcile the
+  owner before claiming the latest SDK and owner are integrated together.
 - Live identity provisioning, protected credential storage, commissioning,
   full #811 hosted runtime composition, DirectAdmin host installation, and the
   remaining #1050 acceptance scope are still outstanding. Keep #1050 open and
   this PR draft until those criteria are independently proved.
+
+## Consumer bootstrap follow-up — 2026-10-03
+
+This actual-owner SQLite run remains pinned to the source-compatible older
+#1252/#1253 pair documented above; it was not rerun against the latest bootstrap
+composition. The latest browser/consumer work and current-main extracted #811
+read-only relay results are recorded in
+[WORKFORCE-COCKPIT-INTEGRATION.md](WORKFORCE-COCKPIT-INTEGRATION.md). Those
+current-main tests cover delayed nonce/bootstrap invalidation, company switching,
+revocation, expiry, denial and empty controls. They do not turn this older owner
+pin into proof of the latest SQLite owner, production identity provisioning, a
+positive governed action, or a live DirectAdmin install.

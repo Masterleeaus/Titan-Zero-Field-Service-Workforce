@@ -242,6 +242,7 @@
       "apps/web/app/sitemap.ts"
     ],
     "NODE_ENV": [
+      "apps/directadmin/workforce/lib/directadmin-bootstrap-raw.mjs",
       "apps/llm-plugin/baseUrl.ts",
       "apps/web/app/ServiceWorkerRegistrar.tsx",
       "apps/web/app/api/v1/portal/auth/confirm/route.ts",
@@ -390,6 +391,9 @@
     ],
     "TITAN_SESSION_CONTEXT_URL": [
       "apps/llm-plugin/lib/titan/context.ts"
+    ],
+    "TITAN_WORKFORCE_DIRECTADMIN_RAW_TEST_CONFIG": [
+      "apps/directadmin/workforce/lib/directadmin-bootstrap-raw.mjs"
     ],
     "TITAN_ZERO_DEVTOOLS": [
       "apps/desktop/electron/main.cjs"

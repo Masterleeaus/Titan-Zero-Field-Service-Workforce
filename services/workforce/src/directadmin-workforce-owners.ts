@@ -4,6 +4,7 @@ import type { StorageClient } from "../../../packages/storage/src/index.js";
 import type { WorkItem, WorkforceStore, WorkforceWorker, WorkforceWorkerStore } from "./index.js";
 import type { SqliteWorkforceStore } from "./sqlite-store.js";
 import type { WorkforceZeroBridgeContext, WithWorkforceZeroSession } from "../../../packages/titan-platform/src/directadmin-session-bridge.js";
+import type { DirectAdminBootstrapNonceFlow } from "./directadmin-bootstrap-nonce-route.js";
 import { projectDirectAdminWorkforceSkills, type CanonicalWorkforceSkillSource } from "./directadmin-workforce-skills.js";
 // @ts-expect-error Canonical authority owner is JavaScript.
 import { AuthorityContextResolver, RuntimeAuthorityGateway, SqliteAuthorityStore, SqliteWorkerAccessStore, WorkerAccessResolver, CapabilityRequirementResolver, assertAuthorityDecisionAllowsExecution } from "../../../packages/runtime/authority/index.mjs";
@@ -39,6 +40,20 @@ export type DirectAdminProjection = Readonly<{
   data: Readonly<Record<string, unknown>>;
 }>;
 
+export type DirectAdminWorkforceReceipt = Readonly<{
+  schema: "titan.directadmin.workforce-receipt.v1";
+  company_id: string;
+  receipt_id: string;
+  operation_id: string;
+  correlation_id: string;
+  work_id: string;
+  run_id?: string;
+  state: "VERIFIED";
+  verification_status: "verified";
+  verification_method: "company-scoped-workforce-reread-and-reassignment-event";
+  evidence_refs: readonly string[];
+}>;
+
 export type DirectAdminWorkforceIntent = Readonly<{
   company_id: string;
   actor_id: string;
@@ -50,6 +65,9 @@ export type DirectAdminWorkforceIntent = Readonly<{
 
 export type DirectAdminGatewayOwners = Readonly<{
   projection(plugin: "titan_workforce" | string, context: DirectAdminBridgeContext): Promise<DirectAdminProjection>;
+  /** Read a receipt only from this already-authenticated company and actor. */
+  receipt(plugin: "titan_workforce" | string, receipt_id: string,
+    context: DirectAdminBridgeContext): Promise<DirectAdminWorkforceReceipt | null>;
   requestIntent(
     plugin: "titan_workforce" | string,
     intent: DirectAdminWorkforceIntent,
@@ -61,7 +79,8 @@ export type DirectAdminGatewayOwners = Readonly<{
 }>;
 
 export type DirectAdminFetchHandler = (request: Request) => Promise<Response>;
-export type DirectAdminGatewayFactory = (owners: DirectAdminGatewayOwners) => DirectAdminFetchHandler;
+export type DirectAdminGatewayFactory = (owners: DirectAdminGatewayOwners,
+  bootstrapNonceFlow?: DirectAdminBootstrapNonceFlow) => DirectAdminFetchHandler;
 
 export type DirectAdminWorkforceRuntime = Readonly<{
   storage: StorageClient;
@@ -490,6 +509,64 @@ export function createDirectAdminWorkforceOwners(runtime: DirectAdminWorkforceRu
   }
 
   return Object.freeze({
+    async receipt(plugin, receipt_id, context) {
+      requireContext(context);
+      if (plugin !== "titan_workforce" || typeof receipt_id !== "string" ||
+          !/^[A-Za-z0-9:._-]{1,200}$/.test(receipt_id) ||
+          /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(receipt_id)) return null;
+      const row = await one(runtime.storage,
+        "SELECT id,company_id,subject_type,subject_id,provenance,payload FROM evidence WHERE company_id=$1 AND id=$2 AND subject_type='work' AND evidence_type='gateway_execution'",
+        [context.company_id, receipt_id]);
+      if (!row) return null;
+
+      const payload = JSON.parse(row.payload);
+      const provenance = JSON.parse(row.provenance);
+      if (provenance?.company_id === context.company_id && provenance?.actor_id !== context.actor_id) return null;
+      const accepted = payload?.accepted_evidence;
+      const verification = payload?.verification;
+      const acceptedVerification = accepted?.verification;
+      const validRunId = payload?.run_id === null || payload?.run_id === undefined || id(payload.run_id);
+      const executionInput = payload?.request_summary?.input;
+      if (row.id !== receipt_id || row.company_id !== context.company_id || row.subject_type !== "work" ||
+          !id(row.subject_id) || payload?.evidence_id !== receipt_id || payload?.company_id !== context.company_id ||
+          payload?.actor_id !== context.actor_id || payload?.capability !== REASSIGN_CAPABILITY ||
+          payload?.execution_class !== "native" || payload?.provider !== "native-workforce-reassignment" ||
+          payload?.state !== "VERIFIED" || payload?.final_outcome !== "verified" ||
+          payload?.work_id !== row.subject_id || !validRunId ||
+          !id(provenance?.operation_id) || !id(provenance?.correlation_id) ||
+          provenance?.company_id !== context.company_id || provenance?.actor_id !== context.actor_id ||
+          provenance?.work_id !== row.subject_id || provenance?.run_id !== (payload.run_id ?? null) ||
+          provenance?.accepted_evidence_id !== receipt_id ||
+          provenance?.idempotency_key !== payload.idempotency_key ||
+          provenance?.idempotency_key !== `${REASSIGN_CAPABILITY}:${provenance.operation_id}` ||
+          payload?.correlation_id !== provenance.correlation_id ||
+          executionInput?.operation_id !== provenance.operation_id ||
+          executionInput?.correlation_id !== provenance.correlation_id ||
+          executionInput?.actor_id !== context.actor_id || executionInput?.work_id !== row.subject_id ||
+          !verification || verification.verified !== true ||
+          verification.method !== "company-scoped-workforce-reread-and-reassignment-event" ||
+          accepted?.schema !== "titan.business.accepted-evidence/v1" || accepted.evidence_id !== receipt_id ||
+          accepted.company_id !== context.company_id || accepted.work_id !== row.subject_id ||
+          accepted.run_id !== (payload.run_id ?? null) || accepted.state !== "VERIFIED" ||
+          accepted.final_outcome !== "verified" || accepted.factual !== true ||
+          acceptedVerification?.verified !== true ||
+          acceptedVerification?.method !== "company-scoped-workforce-reread-and-reassignment-event") {
+        throw new Error("directadmin-workforce-receipt-invalid");
+      }
+      return Object.freeze({
+        schema: "titan.directadmin.workforce-receipt.v1" as const,
+        company_id: context.company_id,
+        receipt_id,
+        operation_id: provenance.operation_id,
+        correlation_id: provenance.correlation_id,
+        work_id: row.subject_id,
+        ...(id(payload.run_id) ? { run_id: payload.run_id } : {}),
+        state: "VERIFIED" as const,
+        verification_status: "verified" as const,
+        verification_method: "company-scoped-workforce-reread-and-reassignment-event" as const,
+        evidence_refs: Object.freeze([receipt_id]),
+      });
+    },
     async projection(plugin, context) {
       requireContext(context);
       if (plugin !== "titan_workforce") throw new Error("directadmin-workforce-plugin-invalid");
@@ -614,6 +691,8 @@ export function createDirectAdminWorkforceOwners(runtime: DirectAdminWorkforceRu
             input: operationInput,
             idempotency_key: idempotencyKey,
             company_id: intent.company_id,
+            actor_id: current.actor_id,
+            correlation_id: intent.correlation_id,
             work_id: item.work_id,
             agent_id: manager.worker_id,
             signal: control?.signal,

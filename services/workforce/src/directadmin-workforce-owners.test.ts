@@ -13,6 +13,10 @@ import type { WorkforceZeroBridgeContext } from "../../../packages/titan-platfor
 import { SqliteRunStore } from "../../../packages/runtime/agent-runtime/sqlite-run-store.mjs";
 // @ts-expect-error Reuse the native production composition and its owned migrations.
 import { createFieldServiceRuntime } from "./field-service-runtime.mjs";
+import { createDirectAdminGateway } from "../../../packages/titan-platform/src/directadmin-gateway.js";
+import { directAdminContextRevisionAssertion } from "../../../packages/titan-platform/src/directadmin-session-bridge.js";
+// @ts-expect-error The test fixture issues actual signed DirectAdmin and Workforce credentials into a disposable SQLite registry.
+import { fixture as directAdminSessionFixture } from "../../../packages/titan-platform/tests/fixtures/directadmin-bridge-fixture.mjs";
 
 const now = "2026-10-02T00:00:00.000Z";
 const REASSIGN_CAPABILITY = "titan.workforce.reassign";
@@ -121,8 +125,8 @@ function requestIntent(owners: ReturnType<typeof createDirectAdminWorkforceOwner
     childSession, signal ? { signal } : undefined);
 }
 
-async function seedManager(runtime: any, company_id = "company-a") {
-  const actor_id = company_id === "company-a" ? "manager-a" : "manager-b";
+async function seedManager(runtime: any, company_id = "company-a", actorOverride?: string) {
+  const actor_id = actorOverride ?? (company_id === "company-a" ? "manager-a" : "manager-b");
   const worker_id = company_id === "company-a" ? "manager-worker-a" : "manager-worker-b";
   await runtime.workforceStore.putWorker({ company_id, worker_id, kind: "human", active: true,
     capabilities: [], human_identity_ref: actor_id });
@@ -131,8 +135,8 @@ async function seedManager(runtime: any, company_id = "company-a") {
   return { actor_id, worker_id };
 }
 
-async function grantReassignment(runtime: any, operation_id: string, company_id = "company-a") {
-  const actor_id = company_id === "company-a" ? "manager-a" : "manager-b";
+async function grantReassignment(runtime: any, operation_id: string, company_id = "company-a", actorOverride?: string) {
+  const actor_id = actorOverride ?? (company_id === "company-a" ? "manager-a" : "manager-b");
   const worker_id = company_id === "company-a" ? "manager-worker-a" : "manager-worker-b";
   const granted_at = new Date().toISOString();
   const expires_at = new Date(Date.now() + 60 * 60_000).toISOString();
@@ -370,6 +374,185 @@ test("reassignment requires a bound human and a current explicit grant, then rec
     assert.equal((await storage.query("SELECT id FROM evidence WHERE company_id=$1 AND evidence_type='gateway_execution' AND json_extract(payload,'$.state')='VERIFIED'", ["company-a"])).rowCount, 1);
   } finally {
     await storage?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("authenticated hosted intent endpoint exposes and replays one durable reassignment receipt across restart", async t => {
+  const dir = mkdtempSync(join(tmpdir(), "titan-directadmin-hosted-intent-"));
+  const workforcePath = join(dir, "workforce.db");
+  let hosted = await hostedFixture(workforcePath);
+  const directAdmin = await directAdminSessionFixture(t);
+  let gateway: ReturnType<typeof createDirectAdminGateway>;
+  let workRuntime: any;
+  const authenticatedRuntime = (runtime: any) => {
+    const resolveChild = async (credential: string, child: WorkforceZeroBridgeContext) => {
+      const verified = await directAdmin.workforceVerifier.authenticate(credential, {
+        company_id: child.company_id, actor_id: child.actor_id, device_id: child.device_id,
+        context_revision: child.context_revision,
+      });
+      const current = verified.context;
+      if (verified.surface !== "zero" || !verified.source_session || current.audience !== "workforce" ||
+          current.company_id !== child.company_id || current.actor_id !== child.actor_id ||
+          current.device_id !== child.device_id || current.session_id !== child.session_id ||
+          current.session_revision !== child.session_revision || current.context_revision !== child.context_revision ||
+          current.allowed_company_ids.length !== 1 || current.allowed_company_ids[0] !== child.company_id ||
+          Date.parse(current.expires_at) !== child.expires_at) throw new Error("runtime-authentication-required");
+      const proof = Object.freeze({ provider: verified.provider, subject: verified.subject,
+        session_id: current.session_id, device_id: current.device_id, session_revision: current.session_revision,
+        credential_expires_at: verified.credential_expires_at, source_session: verified.source_session });
+      return { current, proof };
+    };
+    return Object.freeze({ ...runtime,
+      async verifyWorkforceZeroSession(credential: string, child: WorkforceZeroBridgeContext) {
+        await resolveChild(credential, child);
+      },
+      async withWorkforceZeroSessionFence<T>(credential: string, child: WorkforceZeroBridgeContext,
+        options: { signal?: AbortSignal } | undefined, effect: (signal: AbortSignal) => Promise<T> | T) {
+        const { proof } = await resolveChild(credential, child);
+        return directAdmin.registry.withCurrentSessionFence(proof, {
+          audience: "workforce", company_id: child.company_id, actor_id: child.actor_id,
+          context_revision: child.context_revision,
+        }, { signal: options?.signal }, async (current: any, signal: AbortSignal) => {
+          if (current.company_id !== child.company_id || current.actor_id !== child.actor_id ||
+              current.device_id !== child.device_id || current.session_id !== child.session_id ||
+              current.session_revision !== child.session_revision || current.context_revision !== child.context_revision ||
+              current.allowed_company_ids.length !== 1 || current.allowed_company_ids[0] !== child.company_id ||
+              Date.parse(current.expires_at) !== child.expires_at) throw new Error("runtime-authentication-required");
+          return effect(signal);
+        });
+      },
+    });
+  };
+  const createGateway = (runtime: any) => createDirectAdminGateway(directAdmin.bridge,
+    createDirectAdminWorkforceOwners(authenticatedRuntime(runtime)));
+  const authenticatedRequest = async (path: string, method: "GET" | "POST" = "GET", body?: unknown) => directAdmin.request(path, {
+    method,
+    ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+  });
+  const requestThroughGateway = async (handler: ReturnType<typeof createDirectAdminGateway>, path: string,
+    method: "GET" | "POST" = "GET", body?: unknown) => handler(await authenticatedRequest(path, method, body));
+  try {
+    workRuntime = hosted.runtime;
+    const workers = workRuntime.workforceStore;
+    await seedManager(workRuntime, "company-a", "actor-1");
+    const item = { ...work("company-a", "work-a", [], "READY"), assignee: "worker-old",
+      origin: { actor_id: "worker-old", conversation_id: "conversation-work-a", request_id: "request-work-a",
+        operation_id: "create-work-a", trace_id: "trace-work-a", correlation_id: "origin-correlation", idempotency_key: "create-work-a" } };
+    await workers.put(item);
+    gateway = createGateway(workRuntime);
+    const currentResponse = await requestThroughGateway(gateway, "/v1/directadmin/context");
+    assert.equal(currentResponse.status, 200);
+    const current = await currentResponse.json() as any;
+    assert.equal(current.actor_id, "actor-1");
+    assert.equal(current.company_id, "company-a");
+    assert.equal(current.authority, "not-carried");
+    const path = "/v1/directadmin/titan_workforce/projection";
+    const beforeProjection = await requestThroughGateway(gateway, path);
+    assert.equal(beforeProjection.status, 200);
+    const before = await beforeProjection.json() as any;
+    assert.equal(before.context.company_id, "company-a");
+    assert.equal(before.projection.data.company_id, "company-a");
+    assert.deepEqual(before.projection.data.discovery.controls, []);
+
+    const deniedIntent = { company_id: current.company_id, actor_id: current.actor_id,
+      context_revision: await directAdminContextRevisionAssertion(current.context_revision),
+      capability_id: REASSIGN_CAPABILITY, operation_id: "hosted-denied-operation", correlation_id: "hosted-denied-correlation",
+      input: { action: "reassign", work_id: "work-a", expected_assignee_id: "worker-old",
+        target_worker_id: "worker-target", reason: "No current management grant" } };
+    const denied = await requestThroughGateway(gateway, "/v1/directadmin/titan_workforce/intents", "POST", deniedIntent);
+    assert.equal(denied.status, 403);
+    assert.deepEqual(await denied.json(), { error: "directadmin-workforce-authority-denied", read_only: true });
+    assert.equal((await workers.get("company-a", "work-a"))?.assignee, "worker-old");
+    assert.equal((await hosted.storage.query("SELECT event_seq FROM workforce_events WHERE company_id=$1 AND type='work.reassigned'", ["company-a"])).rowCount, 0);
+    const unsupported = await requestThroughGateway(gateway, "/v1/directadmin/titan_workforce/intents", "POST", {
+      ...deniedIntent, capability_id: "titan.workforce.pause", operation_id: "hosted-unsupported-operation",
+      correlation_id: "hosted-unsupported-correlation",
+      input: { action: "pause", work_id: "work-a", reason: "Pause is not an implemented control" },
+    });
+    assert.equal(unsupported.status, 403);
+    assert.deepEqual(await unsupported.json(), { error: "directadmin-workforce-action-unsupported", read_only: true });
+    assert.equal((await workers.get("company-a", "work-a"))?.state, "READY");
+
+    const operation_id = "hosted-reassign-operation";
+    await grantReassignment(workRuntime, operation_id, "company-a", "actor-1");
+    const exposedResponse = await requestThroughGateway(gateway, path);
+    assert.equal(exposedResponse.status, 200);
+    const exposed = await exposedResponse.json() as any;
+    assert.deepEqual(exposed.projection.data.discovery.controls, [{ capability_id: REASSIGN_CAPABILITY,
+      action: "reassign", requires_fresh_approval: true, grants_authority: false }]);
+    const intent = { ...deniedIntent, operation_id, correlation_id: "hosted-reassign-correlation" };
+    const accepted = await requestThroughGateway(gateway, "/v1/directadmin/titan_workforce/intents", "POST", intent);
+    assert.equal(accepted.status, 202);
+    const acceptedBody = await accepted.json() as any;
+    assert.deepEqual(Object.keys(acceptedBody).sort(), ["correlation_id", "receipt_id", "status"]);
+    assert.equal(acceptedBody.status, "REQUESTED");
+    assert.equal(acceptedBody.correlation_id, intent.correlation_id);
+    assert.match(acceptedBody.receipt_id, /^[A-Za-z0-9:._-]{1,200}$/);
+    const completedProjection = await requestThroughGateway(gateway, path);
+    const projectedWork = ((await completedProjection.json() as any).projection.data.status.work as any[])
+      .find(row => row.work_id === "work-a");
+    assert.equal(projectedWork.assignee, "worker-target");
+    assert.ok(projectedWork.evidence_refs.includes(acceptedBody.receipt_id));
+    const persisted = await hosted.storage.query("SELECT payload,provenance FROM evidence WHERE company_id=$1 AND id=$2 AND evidence_type='gateway_execution'",
+      ["company-a", acceptedBody.receipt_id]);
+    assert.equal(persisted.rowCount, 1);
+    const executionEvidence = JSON.parse(persisted.rows[0]!.payload);
+    assert.equal(executionEvidence.actor_id, "actor-1");
+    assert.equal(executionEvidence.correlation_id, intent.correlation_id);
+    assert.equal(executionEvidence.request_summary.input.actor_id, "actor-1");
+    assert.equal(executionEvidence.request_summary.input.correlation_id, intent.correlation_id);
+    assert.equal(executionEvidence.request_summary.input.operation_id, operation_id);
+    const receiptOwner = createDirectAdminWorkforceOwners(hosted.runtime);
+    const receiptProjection = await receiptOwner.receipt("titan_workforce", acceptedBody.receipt_id, current);
+    assert.deepEqual(receiptProjection, {
+      schema: "titan.directadmin.workforce-receipt.v1",
+      company_id: "company-a",
+      receipt_id: acceptedBody.receipt_id,
+      operation_id,
+      correlation_id: intent.correlation_id,
+      work_id: "work-a",
+      state: "VERIFIED",
+      verification_status: "verified",
+      verification_method: "company-scoped-workforce-reread-and-reassignment-event",
+      evidence_refs: [acceptedBody.receipt_id],
+    });
+    assert.equal(await receiptOwner.receipt("titan_workforce", acceptedBody.receipt_id,
+      { ...current, company_id: "company-b" }), null);
+    assert.equal(await receiptOwner.receipt("titan_workforce", acceptedBody.receipt_id,
+      { ...current, actor_id: "other-actor" }), null);
+    assert.equal(await receiptOwner.receipt("titan_workforce", "unknown-receipt", current), null);
+    const provenance = JSON.parse(persisted.rows[0]!.provenance);
+    assert.deepEqual({ company_id: provenance.company_id, actor_id: provenance.actor_id,
+      request_id: provenance.request_id, operation_id: provenance.operation_id, trace_id: provenance.trace_id,
+      conversation_id: provenance.conversation_id, work_id: provenance.work_id,
+      correlation_id: provenance.correlation_id, idempotency_key: provenance.idempotency_key,
+      accepted_evidence_id: provenance.accepted_evidence_id }, {
+      company_id: "company-a", actor_id: "actor-1", request_id: "request-work-a",
+      operation_id, trace_id: "trace-work-a", conversation_id: "conversation-work-a", work_id: "work-a",
+      correlation_id: intent.correlation_id, idempotency_key: `${REASSIGN_CAPABILITY}:${operation_id}`,
+      accepted_evidence_id: acceptedBody.receipt_id,
+    });
+
+    await hosted.storage.close();
+    hosted = await hostedFixture(workforcePath);
+    gateway = createGateway(hosted.runtime);
+    const replayedReceipt = await hosted.owners.receipt("titan_workforce", acceptedBody.receipt_id, current);
+    assert.deepEqual(replayedReceipt, receiptProjection);
+    const replay = await requestThroughGateway(gateway, "/v1/directadmin/titan_workforce/intents", "POST", intent);
+    assert.equal(replay.status, 202);
+    const replayBody = await replay.json() as any;
+    assert.equal(replayBody.receipt_id, acceptedBody.receipt_id);
+    assert.equal(replayBody.correlation_id, intent.correlation_id);
+    assert.equal((await hosted.runtime.workforceStore.get("company-a", "work-a"))?.assignee, "worker-target");
+    assert.equal((await hosted.storage.query("SELECT event_seq FROM workforce_events WHERE company_id=$1 AND work_id=$2 AND type='work.reassigned'", ["company-a", "work-a"])).rowCount, 1);
+    assert.equal((await hosted.storage.query("SELECT id FROM evidence WHERE company_id=$1 AND evidence_type='gateway_execution' AND json_extract(payload,'$.state')='VERIFIED'", ["company-a"])).rowCount, 1);
+    await hosted.storage.query("UPDATE evidence SET payload=json_set(payload,'$.state','PROVIDER_ACKNOWLEDGED') WHERE company_id=$1 AND id=$2",
+      ["company-a", acceptedBody.receipt_id]);
+    await assert.rejects(() => hosted.owners.receipt("titan_workforce", acceptedBody.receipt_id, current),
+      /directadmin-workforce-receipt-invalid/);
+  } finally {
+    await hosted.storage.close().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   }
 });

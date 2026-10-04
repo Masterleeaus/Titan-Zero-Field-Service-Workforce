@@ -1,5 +1,14 @@
 /** Consumer of the actual #1049 browser session. No authentication or fetch implementation. */
 const REASSIGN_CAPABILITY = 'titan.workforce.reassign';
+const RECEIPT_SCHEMA = 'titan.directadmin.workforce-receipt.v1';
+const RECEIPT_VERIFICATION_METHOD = 'company-scoped-workforce-reread-and-reassignment-event';
+const boundedOwnerId = value => typeof value === 'string' && value.length > 0 && value.length <= 1024 &&
+  value === value.trim() && !/[\u0000-\u001f\u007f]/u.test(value);
+const boundedReceiptId = value => typeof value === 'string' && value.length > 0 && value.length <= 200 &&
+  value === value.trim() && /^[A-Za-z0-9:._-]+$/.test(value) && value !== '.' && value !== '..' &&
+  !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value);
+const boundedContextRevision = value => typeof value === 'string' && value.length > 0 && value.length <= 4096;
+
 export class WorkforceApi {
   #snapshot;
   constructor(session, requestId = () => crypto.randomUUID()) { this.session = session; this.requestId = requestId; }
@@ -32,6 +41,54 @@ export class WorkforceApi {
   async metadata(context) {
     const projection = await this.#load(context);
     return { source: projection.source, freshness: projection.freshness, evidence_refs: [...projection.evidence_refs] };
+  }
+  /**
+   * Read a receipt through the shared DirectAdmin SDK when the host publishes
+   * its typed receipt route. Older hosts expose only the REQUESTED ingress ID;
+   * in that case return null and never infer verification from a work ref.
+   */
+  async receipt(context, receiptId, expected = {}) {
+    if (!boundedReceiptId(receiptId)) throw new Error('workforce-receipt-invalid');
+    // Do not add a network round trip when the shared SDK has no receipt
+    // route. The caller already holds a freshly validated context and no
+    // receipt data will be read or returned in this compatibility case.
+    if (typeof this.session.receipt !== 'function') return null;
+    const current = await this.context();
+    if (current.company_id !== context?.company_id || current.actor_id !== context?.actor_id ||
+        current.session_revision !== context?.session_revision || current.context_revision !== context?.context_revision ||
+        !boundedContextRevision(current.context_revision)) {
+      throw new Error('workforce-context-changed');
+    }
+    // The shared SDK validates and accepts the `{context, receipt}` transport
+    // envelope internally, then returns the typed receipt itself. Revalidate
+    // our context on both sides of that read; do not require the SDK to expose
+    // or duplicate its authenticated envelope to plugin consumers.
+    const candidate = await this.session.receipt('titan_workforce', receiptId);
+    const refs = candidate?.evidence_refs;
+    if (!candidate || candidate.schema !== RECEIPT_SCHEMA || candidate.company_id !== context.company_id ||
+        candidate.receipt_id !== receiptId || !boundedOwnerId(candidate.operation_id) || !boundedOwnerId(candidate.correlation_id) ||
+        !boundedOwnerId(candidate.work_id) || candidate.state !== 'VERIFIED' ||
+        candidate.verification_status !== 'verified' || candidate.verification_method !== RECEIPT_VERIFICATION_METHOD ||
+        !Array.isArray(refs) || refs.length !== 1 || refs[0] !== receiptId ||
+        (candidate.run_id !== undefined && !boundedOwnerId(candidate.run_id))) {
+      throw new Error('workforce-receipt-invalid');
+    }
+    if ((expected.operation_id && candidate.operation_id !== expected.operation_id) ||
+        (expected.correlation_id && candidate.correlation_id !== expected.correlation_id) ||
+        (expected.work_id && candidate.work_id !== expected.work_id)) {
+      throw new Error('workforce-receipt-binding-mismatch');
+    }
+    const after = await this.context();
+    if (after.company_id !== current.company_id || after.actor_id !== current.actor_id ||
+        after.session_revision !== current.session_revision || after.context_revision !== current.context_revision) {
+      throw new Error('workforce-context-changed');
+    }
+    return Object.freeze({ schema: RECEIPT_SCHEMA, company_id: candidate.company_id,
+      receipt_id: candidate.receipt_id, operation_id: candidate.operation_id,
+      correlation_id: candidate.correlation_id, work_id: candidate.work_id, state: candidate.state,
+      ...(candidate.run_id ? { run_id: candidate.run_id } : {}),
+      verification: Object.freeze({ status: 'VERIFIED', method: RECEIPT_VERIFICATION_METHOD }),
+      evidence_refs: Object.freeze([...refs]) });
   }
   async control(context, action) {
     const discovery = await this.discover(context);
@@ -79,7 +136,7 @@ export class WorkforceApi {
     }
     this.#snapshot = null;
     // The SDK gateway returns ingress acknowledgement only. Never forward an invented VERIFIED result.
-    if (receipt?.status !== 'REQUESTED' || receipt.correlation_id !== correlation_id || typeof receipt.receipt_id !== 'string' || !receipt.receipt_id) throw new Error('workforce-receipt-invalid');
+    if (receipt?.status !== 'REQUESTED' || receipt.correlation_id !== correlation_id || !boundedReceiptId(receipt.receipt_id)) throw new Error('workforce-receipt-invalid');
     return { company_id: context.company_id, state: 'REQUESTED', receipt_id: receipt.receipt_id,
       operation_id, correlation_id, work_id: action.work_id, evidence_refs: [] };
   }
