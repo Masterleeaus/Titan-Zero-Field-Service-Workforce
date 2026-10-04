@@ -26,4 +26,23 @@ export async function buildPackage({ sourceDir = resolve(dirname(fileURLToPath(i
   const bytes = tar(entries); await mkdir(outputDir, { recursive: true }); const archivePath = join(outputDir, 'titan_channels.tar.gz'); await writeFile(archivePath, bytes);
   const sha256 = createHash('sha256').update(bytes).digest('hex'); await writeFile(`${archivePath}.sha256`, `${sha256}  titan_channels.tar.gz\n`); return { archivePath, sha256, files: entries.length };
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) console.log(JSON.stringify(await buildPackage({ sdkModulePath: process.argv[2], outputDir: process.argv[3] })));
+function cliOptions(argv) {
+  const options = {};
+  const positional = [];
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === '--source-dir' || arg === '--sdk-module' || arg === '--output-dir') {
+      const key = { '--source-dir': 'sourceDir', '--sdk-module': 'sdkModulePath', '--output-dir': 'outputDir' }[arg];
+      options[key] = argv[++index];
+    } else if (arg.startsWith('--source-dir=')) options.sourceDir = arg.slice(13);
+    else if (arg.startsWith('--sdk-module=')) options.sdkModulePath = arg.slice(13);
+    else if (arg.startsWith('--output-dir=')) options.outputDir = arg.slice(13);
+    else positional.push(arg);
+  }
+  if (!options.sdkModulePath && positional[0]) options.sdkModulePath = positional[0];
+  if (!options.outputDir && positional[1]) options.outputDir = positional[1];
+  return options;
+}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  console.log(JSON.stringify(await buildPackage(cliOptions(process.argv.slice(2)))));
+}
