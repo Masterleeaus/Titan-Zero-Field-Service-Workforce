@@ -61,6 +61,22 @@ Titan Zero separates **understanding**, **decision-making**, **authority**, and 
 
 That separation is fundamental to the architecture.
 
+## Autonomous Lifecycle Example
+
+### PR #1201 · authenticated Workforce execution and durable recovery
+
+**[Open the merged pull request](https://github.com/Masterleeaus/Titan-Zero-Field-Service-Workforce/pull/1201)** · **2 October 2026** · GitHub PR metadata: **+7,573 / −383 lines · 29 conversation comments**
+
+This is a reviewable record of issue-driven, coordinated engineering—not a claim that one PR completed the whole Workforce mission.
+
+1. **Mission and ownership were bounded.** The thread starts from issue #811 and assigns the hosted runtime and recovery seam. It records adjacent ownership for the conversation transport (#1188), registry/session identity (#302 and #1049), streaming (#1182), and DirectAdmin consumer (#1050), with explicit instructions to reuse existing contracts rather than duplicate owners’ code.
+2. **Independent review challenged the first implementation.** The discussion recorded reproducible risks around authority revocation at the effect boundary, action coercion, surface identity, hung operations, and SQLite lock deadlines. Findings were tied to exact heads and disposable tests.
+3. **The implementation iterated against evidence.** The thread documents fixes, exact-head reruns, and corrections when an earlier test report used an incomplete dependency overlay. This preserves both the failure and the corrected result instead of hiding the discrepancy.
+4. **Verification was scoped and reported.** The merged PR records focused test suites and CI evidence for hosted runtime, storage deadlines, session fencing, recovery, and typechecks. It distinguishes automated checks from live-host commissioning.
+5. **The merge claim stayed limited.** GitHub records 29 conversation comments and the final approval for a bounded runtime slice. The full #811 mission remained open; the thread explicitly does not claim production deployment, live provider acceptance, or host commissioning.
+
+The value of this example is the trace: mission boundary → named integration owners → adversarial review → exact-head correction and verification → bounded approval. The linked discussion is the source for the detailed evidence and limitations.
+
 <p align="center">
   <img src="docs/images/4FE3482C-D943-4405-86CF-143AAFEF52C5.png" alt="Titan Zero Field Service Workforce system architecture" width="100%" />
 </p>
