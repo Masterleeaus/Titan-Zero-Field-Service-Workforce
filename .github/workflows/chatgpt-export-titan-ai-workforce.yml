@@ -1,0 +1,71 @@
+name: Export Titan AI Workforce Bundle
+on:
+  push:
+    branches:
+      - chatgpt/export-titan-ai-workforce
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect original workforce code
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="titan-ai-workforce-source"
+          mkdir -p "$OUT"
+
+          copy_path() {
+            local p="$1"
+            if [ -e "$p" ]; then
+              mkdir -p "$OUT/$(dirname "$p")"
+              cp -a "$p" "$OUT/$p"
+            fi
+          }
+
+          copy_path services/workforce
+          copy_path workforce/contracts
+          copy_path apps/web/app/api/v1/titan/workforce
+          copy_path apps/web/app/api/v1/zero/interactions
+          copy_path apps/web/app/app/ZeroChatFirst.tsx
+          copy_path apps/web/app/titan
+          copy_path apps/web/lib/titan
+          copy_path apps/web/components/AppShell.tsx
+          copy_path apps/web/app/globals.css
+          copy_path apps/web/app/layout.tsx
+          copy_path apps/web/app/app/settings/WorkforceHierarchyPanel.tsx
+          copy_path apps/web/app/app/settings/WorkforceLifecyclePanel.tsx
+          copy_path apps/web/app/app/settings/workforce-hierarchy-data.ts
+          copy_path apps/web/app/app/settings/workforce-lifecycle-data.ts
+          copy_path packages/titan-platform/src/ported/titan-workforce
+
+          find packages/titan-platform/src -maxdepth 2 -type f \
+            \( -iname '*workforce*' -o -path '*/workforce-*/*' \) -print0 |
+          while IFS= read -r -d '' p; do copy_path "$p"; done
+
+          find apps/web -type f \
+            \( -iname '*theme*' -o -iname '*dark*' -o -iname '*workforce*' -o -iname '*agent*' \) \
+            -not -path '*/node_modules/*' -not -path '*/.next/*' -print0 |
+          while IFS= read -r -d '' p; do copy_path "$p"; done
+
+          cat > "$OUT/SOURCE.txt" <<'EOF'
+          Source repository: Masterleeaus/Titan-Zero-Field-Service-Workforce
+          Source branch: main
+          Export purpose: Titan AI Workforce transplant into the live AI-FSM deployment.
+          Files under repository paths are copied from the donor repository without rewriting.
+          EOF
+
+          echo "Files:"
+          find "$OUT" -type f | sort
+          echo "Payload:"
+          du -sh "$OUT"
+          find "$OUT" -type f -printf '%s %p\n' | sort -nr | head -30
+      - name: Upload exact source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: titan-ai-workforce-source
+          path: titan-ai-workforce-source
+          compression-level: 6
+          retention-days: 7
