@@ -4,6 +4,7 @@ export * from './directadmin-session-bridge.js';
 export * from './directadmin-gateway.js';
 export * from './directadmin-cockpit.js';
 export * from './directadmin-workforce-skills.js';
+export * from './directadmin-channels.js';
 export type DirectAdminRole = "admin" | "reseller" | "user";
 export type DirectAdminPluginPackage = Readonly<{
   plugin_id: string;

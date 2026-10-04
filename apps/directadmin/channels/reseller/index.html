@@ -1,0 +1,2 @@
+#!/usr/bin/env node
+import('../../lib/entry.mjs').then(({ renderEntry }) => process.stdout.write(renderEntry('reseller'))).catch(() => { process.stdout.write('<p role="alert">Titan Channels package unavailable.</p>'); process.exitCode = 1; });

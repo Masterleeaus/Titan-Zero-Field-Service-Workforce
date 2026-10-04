@@ -4,7 +4,7 @@ import { DirectAdminSessionBridge, DIRECTADMIN_RESPONSE_HEADERS, DIRECTADMIN_CLE
   type DirectAdminBridgeContext, type WithWorkforceZeroSession } from './directadmin-session-bridge.js';
 import type { GovernedIntentRequest } from './directadmin-plugin.js';
 
-export type DirectAdminPluginId = 'titan_zero' | 'titan_workforce' | 'titan_operations' | 'titan_web';
+export type DirectAdminPluginId = 'titan_zero' | 'titan_workforce' | 'titan_operations' | 'titan_web' | 'titan_channels';
 export type DirectAdminProjection = Readonly<{
   company_id: string; source: string; freshness: string | null;
   evidence_refs: readonly string[]; data: unknown;
@@ -174,7 +174,7 @@ export function createDirectAdminGateway(
         const switched = await session.switchCompany(input.company_id);
         return json(200, { status: 'context-changed' }, switched.set_cookie);
       }
-      const route = /^\/v1\/directadmin\/(titan_zero|titan_workforce|titan_operations|titan_web)\/(projection|intents)$/.exec(path);
+  const route = /^\/v1\/directadmin\/(titan_zero|titan_workforce|titan_operations|titan_web|titan_channels)\/(projection|intents)$/.exec(path);
       if (!route) return json(404, { error: 'unknown-plugin-route' });
       const plugin = route[1] as DirectAdminPluginId;
       if (request.method === 'GET' && route[2] === 'projection') {

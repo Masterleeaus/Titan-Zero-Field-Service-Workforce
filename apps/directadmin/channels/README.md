@@ -1,10 +1,10 @@
 # Titan Channels
 
-- Portfolio mission: #1060
-- Base snapshot: this proposed source path was absent at audited `main` commit `14163faa316ac6236e88167b7c8d8a5e95007c7e`.
-- #1187 scope: inventory documentation only at this path.
-- DirectAdmin scope: External transport/provider endpoint connectivity, health, credentials and channel topology.
+DirectAdmin transport/provider cockpit for company-scoped endpoint projections.
+It consumes canonical provider/connector owners through the authenticated
+`titan_channels` projection and submits only governed connection-test intents.
+It never stores credentials, creates a provider registry, or grants authority.
 
-Snapshot scope: at audited `main` commit `14163faa316ac6236e88167b7c8d8a5e95007c7e`, this proposed DirectAdmin source path was absent. This file is an inventory note added by #1187; it does not claim that owner implementation is absent from active branches, canonical packages, or installed hosts. See the [portfolio index snapshot scope](../README.md#snapshot-scope-and-active-owner-work) for linked owner PRs and current boundaries.
-
-Consume canonical Titan contracts and shared Cockpit SDK work; do not add a plugin-local copy of business/runtime, Workforce, authority, evidence or persistence logic. See the [Plugin Development Guide](../../../docs/directadmin/PLUGIN-DEVELOPMENT-GUIDE.md) and [portfolio map](../../../docs/directadmin/PLUGIN-PORTFOLIO-MAP.md).
+The UI is deliberately safe: refresh projection, inspect health/topology, and
+request a synthetic connection test. Real provider sends and credential entry
+are out of scope for this package.
