@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="860" viewBox="0 0 1500 860" role="img" aria-labelledby="title desc">
+  <title id="title">Titan Zero Field Service Workforce architecture</title>
+  <desc id="desc">A field-service operating loop from interaction and signal through intelligence, decision, authority, workforce orchestration, operations, and evidence, with company_id as the tenant boundary.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1a1d"/><stop offset="1" stop-color="#145e59"/></linearGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#8ce7bd"/><stop offset="1" stop-color="#f5c16f"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0 0L10 5L0 10" fill="#f5c16f"/></marker>
+    <style>
+      .eyebrow{font:700 13px Segoe UI,Arial,sans-serif;letter-spacing:2.2px;fill:#93edc0}.title{font:700 32px Segoe UI,Arial,sans-serif;fill:#f6fbf8}.sub{font:400 15px Segoe UI,Arial,sans-serif;fill:#d3eee2}.section{font:700 12px Segoe UI,Arial,sans-serif;letter-spacing:1.7px;fill:#b8dfcf}.node{fill:#194d4c;stroke:#3f8d7e;stroke-width:1.5}.strong{fill:#246c65;stroke:#8ce7bd;stroke-width:2}.authority{fill:#554529;stroke:#f5c16f;stroke-width:2}.label{font:700 16px Segoe UI,Arial,sans-serif;fill:#f7fcf9}.body{font:400 13px Segoe UI,Arial,sans-serif;fill:#d0e9de}.tiny{font:400 12px Segoe UI,Arial,sans-serif;fill:#b5d2c7}.route{stroke:url(#flow);stroke-width:3;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1500" height="860" rx="26" fill="url(#bg)"/>
+  <text x="64" y="58" class="eyebrow">TITAN ZERO FIELD SERVICE WORKFORCE � OPERATING MODEL</text><text x="64" y="106" class="title">A governed loop from business context to accountable work</text><text x="64" y="136" class="sub">Source-backed from apps/, services/, packages/titan-platform, packages/workforce, and db/migrations.</text>
+  <text x="70" y="190" class="section">CONTEXT + INTELLIGENCE</text>
+  <rect x="70" y="220" width="250" height="126" rx="16" class="node"/><text x="195" y="260" text-anchor="middle" class="label">Interaction + Interface</text><text x="195" y="289" text-anchor="middle" class="body">web � PWA � mobile � connectors</text><text x="195" y="315" text-anchor="middle" class="tiny">apps/ + packages/runtime</text>
+  <path d="M320 283H405" class="route"/>
+  <rect x="405" y="220" width="250" height="126" rx="16" class="strong"/><text x="530" y="260" text-anchor="middle" class="label">Signal + Knowledge</text><text x="530" y="289" text-anchor="middle" class="body">context � evidence � provenance</text><text x="530" y="315" text-anchor="middle" class="tiny">packages/provenance + domain</text>
+  <path d="M655 283H740" class="route"/>
+  <rect x="740" y="220" width="250" height="126" rx="16" class="strong"/><text x="865" y="260" text-anchor="middle" class="label">Decision + Model Council</text><text x="865" y="289" text-anchor="middle" class="body">recommendation ? authority</text><text x="865" y="315" text-anchor="middle" class="tiny">packages/workforce/decision</text>
+  <path d="M990 283H1075" class="route"/>
+  <rect x="1075" y="220" width="350" height="126" rx="16" class="authority"/><text x="1250" y="260" text-anchor="middle" class="label">Authority + Risk + Governance</text><text x="1250" y="289" text-anchor="middle" class="body">company_id � policy � approval</text><text x="1250" y="315" text-anchor="middle" class="tiny">packages/titan-platform � auth boundaries</text>
+  <text x="70" y="450" class="section">WORK + OPERATIONS</text>
+  <path d="M1250 346V500H1070" class="route"/>
+  <rect x="900" y="510" width="340" height="126" rx="16" class="strong"/><text x="1070" y="550" text-anchor="middle" class="label">Nexus Workforce</text><text x="1070" y="579" text-anchor="middle" class="body">roles � capability � handover</text><text x="1070" y="605" text-anchor="middle" class="tiny">packages/workforce + services/workforce</text>
+  <path d="M900 573H780" class="route"/>
+  <rect x="430" y="510" width="350" height="126" rx="16" class="node"/><text x="605" y="550" text-anchor="middle" class="label">Tools + Connectors + Operations</text><text x="605" y="579" text-anchor="middle" class="body">scheduling � dispatch � money � inventory</text><text x="605" y="605" text-anchor="middle" class="tiny">packages/business-services � services/worker</text>
+  <path d="M430 573H310V700H590" class="route"/>
+  <rect x="590" y="700" width="560" height="92" rx="16" class="authority"/><text x="870" y="738" text-anchor="middle" class="label">Evidence + State + Outcomes</text><text x="870" y="766" text-anchor="middle" class="body">audit � recovery � reversible execution � offline support</text>
+  <path d="M1150 746H1350V410H1250V346" class="route"/>
+  <rect x="70" y="700" width="390" height="92" rx="16" class="node"/><text x="265" y="738" text-anchor="middle" class="label">Canonical boundary</text><text x="265" y="766" text-anchor="middle" class="body">company_id scopes data, policy, and execution</text>
+</svg>
+
