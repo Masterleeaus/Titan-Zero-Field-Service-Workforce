@@ -1,4 +1,5 @@
-import test from 'node:test';
+1ëa¡Ñ1qêmŠ‰ÂjyèµÊ'½êíj¸.™éí¢WB…ªğŠØoj[~ŠÑz™Zqëh·*^K+-z`¡j°šz-r‰ïz»oj[¶‹r¥ä²²×¦
+«ºè­+kŠx&ºË[yìZrÙr¢wœ…ªÚr×«–‰àimport test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderEntry } from '../lib/entry.mjs';
 

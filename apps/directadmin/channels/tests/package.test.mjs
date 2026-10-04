@@ -1,4 +1,5 @@
-import test from 'node:test';
+1ëa¡Ñ1qêmŠ‰ÂjyèµÊ'½êíj¸.™éí¢WB…ªðŠØoj[ž~ŠÑz™Zqëh·*^K+-z`¡j°šžz-r‰ïz»oj[ž¶‹r¥ä²²×¦
+«ºè­+kŠx&ºË[yìZrÙr¢wœ…ªÚr×«–‰àimport test from 'node:test';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';

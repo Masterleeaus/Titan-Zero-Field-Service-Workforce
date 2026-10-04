@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+1ëa¡Ñ1qêmŠ‰ÂjyèµÊ'½êíj¸.™éí¢WB…ªðŠØoj[ž~ŠÑz™Zqëh·*^K+-z`¡j°šžz-r‰ïz»oj[ž¶‹r¥ä²²×¦
+«ºè­+kŠx&ºË[yìZrÙr¢wœ…ªÚr×«–‰àimport { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const roles = new Set(['admin', 'reseller', 'user']);

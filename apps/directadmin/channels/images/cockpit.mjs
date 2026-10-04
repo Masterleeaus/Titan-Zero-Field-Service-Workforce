@@ -1,4 +1,5 @@
-import * as SDK from 'titan-sdk';
+1ëa¡Ñ1qêmŠ‰ÂjyèµÊ'½êíj¸.™éí¢WB…ªðŠØoj[ž~ŠÑz™Zqëh·*^K+-z`¡j°šžz-r‰ïz»oj[ž¶‹r¥ä²²×¦
+«ºè­+kŠx&ºË[yìZrÙr¢wœ…ªÚr×«–‰àimport * as SDK from 'titan-sdk';
 
 const root = document.getElementById('titan-channels');
 const status = root?.querySelector('[role="status"]');

@@ -1,4 +1,5 @@
-# Titan Channels
+1ëa¡Ñ1qêmŠ‰ÂjyèµÊ'½êíj¸.™éí¢WB…ªğŠØoj[~ŠÑz™Zqëh·*^K+-z`¡j°šz-r‰ïz»oj[¶‹r¥ä²²×¦
+«ºè­+kŠx&ºË[yìZrÙr¢wœ…ªÚr×«–‰à# Titan Channels
 
 DirectAdmin transport/provider cockpit for company-scoped endpoint projections.
 It consumes canonical provider/connector owners through the authenticated

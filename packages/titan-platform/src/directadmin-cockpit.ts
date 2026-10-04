@@ -1,4 +1,5 @@
-import { directAdminContextRevisionAssertion, type DirectAdminBridgeContext } from './directadmin-session-bridge.js';
+1ëa¡Ñ1qêmŠ‰ÂjyèµÊ'½êíj¸.™éí¢WB…ªðŠØoj[ž~ŠÑz™Zqëh·*^K+-z`¡j°šžz-r‰ïz»oj[ž¶‹r¥ä²²×¦
+«ºè­+kŠx&ºË[yìZrÙr¢wœ…ªÚr×«–‰àimport { directAdminContextRevisionAssertion, type DirectAdminBridgeContext } from './directadmin-session-bridge.js';
 import type { DirectAdminPluginId, DirectAdminProjection } from './directadmin-gateway.js';
 import { assertDirectAdminProjection } from './directadmin-gateway.js';
 import { assertDirectAdminWorkforceSkillsProjection } from './directadmin-workforce-skills.js';

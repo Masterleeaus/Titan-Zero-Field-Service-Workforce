@@ -1,4 +1,5 @@
-/** Provider-neutral channel projections. This module owns no credentials, provider
+1ëa¡Ñ1qêmŠ‰ÂjyèµÊ'½êíj¸.™éí¢WB…ªðŠØoj[ž~ŠÑz™Zqëh·*^K+-z`¡j°šžz-r‰ïz»oj[ž¶‹r¥ä²²×¦
+«ºè­+kŠx&ºË[yìZrÙr¢wœ…ªÚr×«–‰à/** Provider-neutral channel projections. This module owns no credentials, provider
  * registry, communications semantics, authority, or persistence. */
 export type ChannelDirection = 'inbound' | 'outbound' | 'bidirectional';
 export type ChannelLifecycle = 'DISCOVER' | 'CONNECT' | 'AUTHORIZE' | 'CONFIGURE' | 'TEST' | 'VERIFY' | 'ACTIVE' | 'DEGRADED' | 'PAUSED' | 'REAUTH_REQUIRED' | 'ROTATE' | 'REBIND' | 'DISCONNECT' | 'RETIRE';
