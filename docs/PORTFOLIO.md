@@ -32,7 +32,7 @@ The key trade-off is deliberate separation: model output, a proposed decision, a
 
 ## Quickstart
 
-Pre## Quickstart
+## Quickstart
 
 For a clean checkout, use the repository's default SQLite path. Node.js `>=20.9.0` and pnpm `9.12.0` are required. Docker/Compose and Bash are only needed for the full gate or the optional legacy PostgreSQL path.
 
