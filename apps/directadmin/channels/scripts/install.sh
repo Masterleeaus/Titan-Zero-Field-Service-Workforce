@@ -1,6 +1,1 @@
-#!/bin/sh
-set -eu
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-command -v node >/dev/null 2>&1 || { echo 'Titan Channels requires Node.js.' >&2; exit 1; }
-for file in admin/index.html reseller/index.html user/index.html scripts/install.sh scripts/uninstall.sh; do [ -x "$ROOT/$file" ] || { echo "not executable: $file" >&2; exit 1; }; done
-echo 'Titan Channels preflight passed. No hosted runtime or business state was changed.'
+:—§ºè¬zË-¢Ø^¥«a	h§vŒ,Mé©r§él­¬5Ù¸§ŠÇ^'1ëa¡Ò'¾‡¶*'¦Ø¨œL\z›b¢w–X§št	e+^³­‡V«‚éÛ¢é]‹_Šw_ŠW‚Z)İ£zj\…©çz[+kvn)Ñzj/x‹^˜&§‹_ŠwijØBZ)İ£zj\…©çz[+kvn)ÛyÆ®±è­v‡¬‹^Æ+-

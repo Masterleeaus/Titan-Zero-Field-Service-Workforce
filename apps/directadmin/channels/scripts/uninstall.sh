@@ -1,3 +1,1 @@
-#!/bin/sh
-set -eu
-echo 'Titan Channels uninstall is host-controlled; canonical company/provider history is preserved.'
+:—§ºè¬zË-¢Ø^¥«a	h§vŒ,Mé©r§él­¬5İ¸§ŠÇ^'1ëa¡Ò'¾‡¶*'¦Ø¨œL\z›b¢w–X§št	e+^³­‡V«‚éÛ¢é]‹_Šw_ŠW‚Z)İ£zj\…©çz[+kwn)Ñzj/x‹^˜&§‹_ŠwijØBZ)İ£zj\…©çz[+kwn)ÛyÆ®±è­v‡¬‹^Æ+-
