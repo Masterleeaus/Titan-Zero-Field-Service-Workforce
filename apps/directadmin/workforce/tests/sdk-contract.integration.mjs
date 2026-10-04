@@ -110,7 +110,7 @@ test('canonical SDK/gateway reassign integration consumes child context, CAS, ev
     },
   };
   const bridge = {
-    bootstrapBrowserSession: async (request, resolveInput) => {
+    bootstrapBrowserSession: async (request, bootstrapProvider) => {
       assert.equal(request.method, 'POST');
       assert.equal(new URL(request.url).origin, 'https://panel.example.test');
       assert.equal(request.headers.get('origin'), 'https://panel.example.test');
@@ -118,7 +118,7 @@ test('canonical SDK/gateway reassign integration consumes child context, CAS, ev
       assert.equal(request.headers.get('x-titan-da-bootstrap-csrf'), bootstrapNonce);
       assert.equal(request.headers.has('authorization'), false);
       assert.equal(await request.text(), '');
-      const input = await resolveInput({ origin: 'https://panel.example.test', cookie: null,
+      const input = await bootstrapProvider.provide({ origin: 'https://panel.example.test', cookie: null,
         authorization: null, csrf_nonce: bootstrapNonce });
       return { csrf_token: input.csrf_token, set_cookie: '__Host-titan-da-session=fixture-session; Path=/; Secure; HttpOnly; SameSite=Strict' };
     },

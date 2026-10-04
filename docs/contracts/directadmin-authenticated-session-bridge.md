@@ -1,12 +1,14 @@
 # DirectAdmin authenticated session bridge — #1049
 
-Status: PR #1204 merged into main at `75cc7f020353063aba129e5238b35e78de62291c`; #1049 remains open and partial/non-closing. This follow-up corrects switch replacement-session rejection mapping; no DirectAdmin host is commissioned. Its current-main ancestry includes the merged #1183 identity owner, #1201 Workforce HTTP server, #1211 DirectAdmin RAW relay, and #1240 company-placement resolver. The SDK composes the canonical #302 DirectAdmin-to-Workforce/Zero exchange with the server and relay in disposable fixtures. Unsupported lifecycle actions remain denied without effects, and no DirectAdmin host is commissioned.
+Status: PR #1204 merged into main at `75cc7f020353063aba129e5238b35e78de62291c`; #1049 remains open and partial/non-closing. This continuation binds the SDK bootstrap boundary directly to #302's canonical assertion provider and adds an end-to-end disposable composition test. No DirectAdmin host is commissioned. Its current-main ancestry includes the merged #1183 identity owner, #1201 Workforce HTTP server, #1211 DirectAdmin RAW relay, and #1240 company-placement resolver. The SDK composes the canonical #302 DirectAdmin-to-Workforce/Zero exchange with the server and relay in disposable fixtures. Unsupported lifecycle actions remain denied without effects.
 
 ## Canonical identity and browser boundary
 
 `DirectAdminSessionBridge` delegates authentication, company switching, revocation and Workforce/Zero exchange to the canonical #302 `createSessionCredentialService`. It does not implement signature verification, issue keys, provision identities or create another registry. The verified provider must equal the configured DirectAdmin HTTPS issuer. The request origin, commissioned node and audience are fixed by trusted startup configuration.
 
 The browser projection exposes only `company_ids: [current.company_id]`; switchable companies never become operation scope. Actor, company, device, session and revisions come from current canonical registry state. Caller IDs, company headers, a node token, DirectAdmin role and a session ID alone supply no Titan business authority.
+
+`DirectAdminSessionBridge.bootstrapBrowserSession` accepts the canonical #302 `DirectAdminLoginAssertionProvider` type exported through `security-boundary.ts`. Trusted composition passes `createDirectAdminBootstrapFlow(...).provide`; the SDK no longer accepts an arbitrary per-request resolver callback or declares a second assertion-provider contract. The bridge still validates its same-origin, Fetch Metadata, empty-body and one-time nonce boundary first, then forwards only its allowlisted origin/cookie/authorization/nonce proof to that server-only provider. An absent provider fails closed. The SDK verifies the returned assertion through the canonical session credential service and projects only the selected company.
 
 The canonical context revision is an opaque registry snapshot string. The browser SDK sends a versioned `ctx1_` SHA-256 assertion over that value to fit the RAW relay's bounded URL-safe intent contract. It carries no authority: the SDK gateway compares it against the freshly authenticated canonical revision before accepting the intent. The authenticated revision remains unchanged in server-side owner context.
 
@@ -51,9 +53,14 @@ A disposable composed HTTP probe used the #812 browser helper and actual `.raw` 
 
 - GET `/v1/directadmin/context`
 - GET `/v1/directadmin/{titan_zero,titan_workforce,titan_operations,titan_web}/projection`
+- GET `/v1/directadmin/titan_workforce/receipts/{receipt_id}`
 - POST `/v1/directadmin/{titan_zero,titan_workforce,titan_operations,titan_web}/intents`
 - POST `/v1/directadmin/company` with `{ "company_id": "..." }`
 - POST `/v1/directadmin/logout`
+
+The receipt route is a read-only Workforce consumer. It accepts one bounded receipt ID path segment, with no query string or request body, and uses the same authenticated cookie, in-memory CSRF token, Origin and Fetch Metadata checks as other SDK routes. The bridge revalidates the current canonical session before and after the owner read and passes only the selected company/actor context. The owner must look up accepted evidence using that context; unknown and out-of-scope IDs return the same sanitized not-found response. The SDK validates the receipt schema, requested ID, selected company, verification marker and evidence reference before returning it to a plugin. A `REQUESTED` submission response is never promoted by this read path; only the canonical Workforce accepted-evidence owner can report `VERIFIED`.
+
+The #811 receipt projection exists in its current draft, but its HTTP route is not yet mounted. The #812/#1050 fixed relay selector also still needs this exact GET path before a deployed browser can reach the SDK consumer. This SDK contract does not edit or certify those host/Workforce seams.
 
 The Fetch gateway is not a listener, CLI or deployment. The launched #811/#812 host owns transport deadlines, rate limits and actual projection/intent owners. A successful SDK response reports `REQUESTED` only; the SDK does not authorize or execute business effects.
 
@@ -61,7 +68,9 @@ The exported support-diagnostics sanitizer removes sensitive object fields and i
 
 Contribution SDK compatibility is a separately versioned API contract (currently `1.0.0`, independent of the package release version). The registry accepts compatible minor/patch versions and exposes a stable degraded reason when a plugin requires another major. This only isolates incompatible plugin UI/contributions; it does not change or grant downstream authority.
 
-## Current verification
+## Historical verification (merged PR #1204)
+
+The following evidence records the earlier merged SDK slice and is retained as provenance. It does not describe the follow-up candidate documented below.
 
 The current disposable integration fixture used PR head `1f57f03c209199f2e724e70629fa71a496f0eb1b` plus merged main `c883304a662738fe480ec1e5d044fdeb0c4c879e`, before this documentation-only refresh:
 
@@ -73,11 +82,21 @@ The current disposable integration fixture used PR head `1f57f03c209199f2e724e70
 - A disposable relay/SDK/#811 HTTP probe at main `14163faa` and then-candidate #812 relay `9ffef58d` returned the selected-company projection, a sanitized typed 403, and 401 after source revocation; work-order completion remained zero. #812/#1211 later merged at `8199494eeacc3513b293311d88a469a654ee4dea`; the HTTP probe has not been rerun against the merged relay.
 - GitHub comparison confirmed current main `c883304a662738fe480ec1e5d044fdeb0c4c879e` was an ancestor of that fixture head. The published PR diff scan found no added-line trailing whitespace or conflict markers.
 - Independent review confirmed the DirectAdmin bridge, gateway, cockpit and plugin-auth files remain unchanged from reviewed source `e428b67b`; canonical identity files match merged main. No collision or must-fix authentication/authority issue was found. The extra merge only imports non-overlapping #1240-owned storage files.
-- Hosted exact-head checks for the documentation refresh are recorded on PR #1204; this evidence block is refreshed after those checks conclude.
+- Hosted exact-head checks for the documentation refresh were recorded on PR #1204.
 - A prior full Titan Platform suite at source `e428b67b` with main `14163faa` recorded **1,054 passed / 72 failed / 2 skipped** out of 1,128. It was not rerun on the merged candidate; this remains historical evidence. Exact-head Titan CI's platform regression gate passed on the preceding code-only merge candidate.
+
+## Current verification (2026-10-02 continuation)
+
+This continuation was based on current main `64244edefb93a07c9ba55fb15276bbf91b7414ea` and keeps identity ownership in #302. It changes only the SDK bootstrap bridge/gateway, the Workforce consumer contract test, the SDK bridge tests, and this document.
+
+- Titan Platform typecheck passed: `tsc -p tsconfig.json --noEmit`.
+- Titan Platform test compilation passed, followed by the focused canonical credential, nonce/provider, bridge/gateway, plugin-consumer and new end-to-end composition suite: **176/176 passed**, zero skips.
+- The new disposable integration uses SQLite `GLOBAL_REGISTRY`, `createDirectAdminBootstrapFlow`, a fixed HTTPS `/api/session` fixture, generated signing keys, `createSessionCredentialService`, the real SDK gateway and cockpit session. It verifies nonce replay denial, caller/company spoof rejection, selected-company-only projection, three SDK plugin routes, company-switch invalidation, membership revocation and that bootstrap errors omit the DirectAdmin cookie and nonce. Companion plugin tests cover diagnostic-field and free-form secret redaction.
+- `node --test apps/directadmin/workforce/tests/*.test.mjs` with the existing temporary Playwright browser cache: **45/45 passed**, including the SDK contract consumer and browser lifecycle suite.
+- These checks establish the SDK/provider composition in disposable fixtures only. They do not certify the #1300 host bootstrap routes, a commissioned DirectAdmin installation, OS/browser access, production proxy headers, real identity mappings or a hosted server smoke.
 ## Remaining acceptance work
 
-Keep this PR draft and #1049 open. Workforce intent owners still deny unsupported lifecycle controls with a typed 403, so this composition has no accepted action or business-effect evidence. Duplicate-request, cancellation and timeout/UNCERTAIN behavior remain downstream acceptance work. Independent review of the authentication code found no must-fix issue, but maintainer approval and exact-head hosted gates for this latest documentation refresh are still required before any merge.
+Keep the continuation PR draft and #1049 open. Workforce intent owners still deny unsupported lifecycle controls with a typed 403, so this composition has no accepted action or business-effect evidence. Duplicate-request, cancellation and timeout/UNCERTAIN behavior remain downstream acceptance work. An independent review of the provider-contract change found no must-fix authentication or authority issue. Maintainer approval and passing exact-head hosted gates remain prerequisites for any merge.
 
 The earlier disposable HTTP composition predates the #812/#1211 merge; rerun the combined relay/Workforce probe against current main before relying on that evidence for commissioning. Real DirectAdmin assertion issuance, approved actor/company/device mappings, secured browser and OS access, Evolution role-package installation, production proxy/header checks, registry commissioning and a real-host smoke remain external prerequisites. No persistent credential, security setting, migration, server deployment or merge was performed.
 Rollback withdraws the SDK bridge and consumers. It introduces no SDK identity store or persistence migration. Retain #302's separately owned session/revocation data and do not restore a weaker credential fallback.

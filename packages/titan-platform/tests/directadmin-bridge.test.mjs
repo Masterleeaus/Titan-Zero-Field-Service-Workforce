@@ -39,14 +39,14 @@ const directBrowserFetch = (f, gateway) => {
   };
   return { fetcher, cookie: () => cookie };
 };
-const trustedBootstrapInput = input => async proof => {
+const trustedBootstrapInput = input => ({ provide: async proof => {
   assert.equal(proof.csrf_nonce, bootstrapNonce);
   assert.equal(proof.origin, ORIGIN);
   assert.equal(proof.cookie, null);
   assert.equal(proof.authorization, null);
   assert.deepEqual(Object.keys(proof).sort(), ['authorization', 'cookie', 'csrf_nonce', 'origin']);
   return input;
-};
+} });
 
 for (const role of ['admin', 'reseller', 'user']) test(`signed ${role} maps canonical actor and selected company only`, async t => {
   const f = await fixture(t);
@@ -143,6 +143,12 @@ for (const [label, revoke] of [
 const intentBody = f => ({ company_id: 'company-a', actor_id: 'actor-1', context_revision: f.claims.context_revision,
   capability_id: 'ops.inspect', operation_id: 'operation-1', correlation_id: 'correlation-1', input: {} });
 const post = body => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const workforceReceipt = (company_id, receipt_id) => ({
+  schema: 'titan.directadmin.workforce-receipt.v1', company_id, receipt_id,
+  operation_id: 'operation-1', correlation_id: 'correlation-1', work_id: 'work-1',
+  state: 'VERIFIED', verification_status: 'verified',
+  verification_method: 'company-scoped-workforce-reread-and-reassignment-event', evidence_refs: [receipt_id],
+});
 
 test('trusted bootstrap exchanges a signed DirectAdmin assertion for only a selected-company HttpOnly session cookie', async t => {
   const f = await fixture(t);
@@ -158,6 +164,12 @@ test('trusted bootstrap exchanges a signed DirectAdmin assertion for only a sele
   assert.equal(authenticated.context.company_id, 'company-a');
   assert.deepEqual(authenticated.context.company_ids, ['company-a']);
   assert.equal(authenticated.context.authority, 'not-carried');
+});
+
+test('bootstrap fails closed when the canonical #302 assertion provider is not composed', async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.bridge.bootstrapBrowserSession(bootstrapRequest(f), undefined), error =>
+    directAdminBridgeFailureKind(error) === 'unavailable');
 });
 
 test('bootstrap rejects cross-origin and extra caller identity before consuming the assertion', async t => {
@@ -619,6 +631,98 @@ test('shared browser session consumes Workforce and encodes opaque canonical rev
     headers: { 'content-type': 'application/json', cookie: browserCookie, 'x-titan-csrf': csrf },
   }));
   assert.equal(mismatch.status, 409);
+});
+
+test('shared browser SDK reads typed Workforce receipts only for the current selected company', async t => {
+  const f = await fixture(t);
+  const gateway = createDirectAdminGateway(f.bridge, f.owners,
+    bootstrapProviderFor(f, 'workforce-receipt-read'));
+  const direct = directBrowserFetch(f, gateway);
+  const seen = [];
+  f.owners.receipt = async (plugin, receipt_id, context) => {
+    seen.push({ plugin, receipt_id, actor_id: context.actor_id, company_id: context.company_id,
+      context_revision: context.context_revision, session_revision: context.session_revision });
+    return context.company_id === 'company-a' && receipt_id === 'accepted-evidence:1'
+      ? workforceReceipt(context.company_id, receipt_id) : null;
+  };
+  const session = new DirectAdminCockpitSession(() => 'H'.repeat(43), direct.fetcher);
+  t.after(() => session.dispose());
+  await session.connect();
+
+  const callsBeforeInvalidInputs = seen.length;
+  await assert.rejects(session.receipt('titan_zero', 'accepted-evidence:1'), /receipt-request-invalid/);
+  await assert.rejects(session.receipt('titan_workforce', '..'), /receipt-request-invalid/);
+  await assert.rejects(session.receipt('titan_workforce', `${'a'.repeat(24)}.${'b'.repeat(24)}.${'c'.repeat(24)}`), /receipt-request-invalid/);
+  assert.equal(seen.length, callsBeforeInvalidInputs, 'invalid route/plugin/credential-shaped IDs never reach an owner');
+
+  const unknown = await direct.fetcher('/v1/directadmin/titan_workforce/receipts/unknown-evidence', {
+    method: 'GET', headers: { 'X-Titan-CSRF': csrf },
+  });
+  assert.equal(unknown.status, 404);
+  const notFoundBody = await unknown.text();
+  assert.deepEqual(JSON.parse(notFoundBody), { error: 'directadmin-workforce-receipt-not-found', read_only: true });
+
+  const receipt = await session.receipt('titan_workforce', 'accepted-evidence:1');
+  assert.equal(receipt.schema, 'titan.directadmin.workforce-receipt.v1');
+  assert.equal(receipt.state, 'VERIFIED');
+  assert.equal(receipt.company_id, 'company-a');
+  assert.deepEqual(seen.at(-1), { plugin: 'titan_workforce', receipt_id: 'accepted-evidence:1', actor_id: 'actor-1',
+    company_id: 'company-a', context_revision: f.claims.context_revision, session_revision: 1 });
+
+  await session.switchCompany('company-b');
+  await session.connect();
+  await assert.rejects(session.receipt('titan_workforce', 'accepted-evidence:1'), /directadmin-http-404/);
+  assert.equal(seen.at(-1).company_id, 'company-b');
+  assert.equal(seen.at(-1).actor_id, 'actor-1');
+  const outOfScope = await direct.fetcher('/v1/directadmin/titan_workforce/receipts/accepted-evidence:1', {
+    method: 'GET', headers: { 'X-Titan-CSRF': csrf },
+  });
+  assert.equal(outOfScope.status, 404);
+  assert.equal(await outOfScope.text(), notFoundBody, 'unknown and out-of-company receipt IDs have identical responses');
+});
+
+test('receipt reads revalidate revocation after the owner callback and redact malformed owner results', async t => {
+  const f = await fixture(t);
+  const gateway = createDirectAdminGateway(f.bridge, f.owners);
+  f.owners.receipt = async (_plugin, receipt_id, context) => {
+    await f.registry.revokeSession(f.claims.session_id, 1);
+    return workforceReceipt(context.company_id, receipt_id);
+  };
+  const revoked = await gateway(f.request('/v1/directadmin/titan_workforce/receipts/accepted-evidence-1'));
+  assert.equal(revoked.status, 401);
+  assert.deepEqual(await revoked.json(), { error: 'directadmin-session-rejected', read_only: true });
+
+  const g = await fixture(t);
+  const secondGateway = createDirectAdminGateway(g.bridge, g.owners);
+  g.owners.receipt = async (_plugin, receipt_id) => workforceReceipt('company-b', receipt_id);
+  const malformed = await secondGateway(g.request('/v1/directadmin/titan_workforce/receipts/accepted-evidence-1'));
+  assert.equal(malformed.status, 503);
+  const malformedBody = await malformed.text();
+  assert.deepEqual(JSON.parse(malformedBody), { error: 'directadmin-context-or-owner-unavailable', read_only: true });
+  assert.equal(malformedBody.includes('company-b'), false);
+});
+
+test('receipt route rejects other plugins and never accepts query overrides or bearer-shaped IDs', async t => {
+  const f = await fixture(t);
+  const gateway = createDirectAdminGateway(f.bridge, f.owners);
+  let calls = 0;
+  f.owners.receipt = async () => { calls++; return null; };
+  assert.equal((await gateway(f.request('/v1/directadmin/titan_zero/receipts/accepted-evidence-1'))).status, 404);
+  assert.equal((await gateway(f.request('/v1/directadmin/titan_workforce/receipts/a?company_id=company-b'))).status, 400);
+  assert.equal((await gateway(f.request('/v1/directadmin/titan_workforce/receipts/accepted-evidence-1',
+    { method: 'POST', body: '{}' }))).status, 405);
+  const tokenId = `${'a'.repeat(24)}.${'b'.repeat(24)}.${'c'.repeat(24)}`;
+  const response = await gateway(f.request(`/v1/directadmin/titan_workforce/receipts/${tokenId}`));
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: 'directadmin-workforce-receipt-not-found', read_only: true });
+  assert.equal(calls, 0);
+
+  const unavailableFixture = await fixture(t);
+  delete unavailableFixture.owners.receipt;
+  const unavailable = await createDirectAdminGateway(unavailableFixture.bridge, unavailableFixture.owners)(
+    unavailableFixture.request('/v1/directadmin/titan_workforce/receipts/accepted-evidence-1'));
+  assert.equal(unavailable.status, 503);
+  assert.deepEqual(await unavailable.json(), { error: 'directadmin-context-or-owner-unavailable', read_only: true });
 });
 
 test('browser initialization uses a trusted nonce, keeps the returned CSRF token in memory, and retries only with a fresh nonce', async t => {
