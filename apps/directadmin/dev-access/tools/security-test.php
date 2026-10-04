@@ -451,7 +451,7 @@ expect_true(run_security_git_fixture(['-C',$workflowRepo,'switch','--quiet','--c
 $paddedContext=directadmin_git_repository_context($workflowRepo);
 expect_true(is_array($paddedContext),'padded branch repository context must remain HOME-bounded');
 $missingUpstreamProbe=directadmin_git_probe($paddedContext,['rev-list','--left-right','--count','HEAD...@{u}']);
-expect_true(($missingUpstreamProbe['status']??null)==='unknown'&&($missingUpstreamProbe['reason']??null)==='command_failed','a real nonzero Git probe without upstream must be recorded as unknown');
+expect_true(($missingUpstreamProbe['status']??null)==='unknown'&&($missingUpstreamProbe['reason']??null)==='git_inspection_disabled','padded branch Git probe must remain unavailable while repository inspection is disabled');
 $paddedReadiness=codex_readiness($workflowRepo,[],['git'=>'/usr/bin/git']);
 expect_true($paddedReadiness['git_claim_branch_format_valid']===false&&$paddedReadiness['git_claim_issue_number']===null,'padded issue numbers must not be shown as canonical claim branches');
 expect_true($paddedReadiness['git_upstream_configured']===null&&$paddedReadiness['git_upstream_state']==='unknown'&&$paddedReadiness['git_ahead']===null&&$paddedReadiness['git_behind']===null,'failed/missing upstream probe must produce unknown state and unknown divergence counts');
