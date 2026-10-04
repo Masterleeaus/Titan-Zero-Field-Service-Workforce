@@ -876,26 +876,6 @@ function directadmin_git_environment(){
 }
 function directadmin_git_probe($context,$arguments){
  return ['status'=>'unknown','output'=>null,'reason'=>'git_inspection_disabled'];
- $commandArguments=directadmin_git_command_args($context,$arguments);
- if($commandArguments===null) return ['status'=>'unknown','output'=>null,'reason'=>'unsafe_filter_config'];
- $argv=array_merge(['/usr/bin/env','timeout','5s'],$commandArguments);
- $spec=[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']];
- $restore=directadmin_terminal_enter_verified_cwd($context['root']??null);
- if($restore===null) return ['status'=>'unknown','output'=>null,'reason'=>'cwd_changed'];
- try{
-  $proc=@proc_open($argv,$spec,$pipes,null,directadmin_git_environment(),['bypass_shell'=>true]);
-  if(!is_resource($proc)) return ['status'=>'unknown','output'=>null,'reason'=>'spawn_failed'];
-  fclose($pipes[0]);
-  $out=stream_get_contents($pipes[1],8193);
-  $err=stream_get_contents($pipes[2],8193);
-  fclose($pipes[1]); fclose($pipes[2]);
-  $rc=proc_close($proc);
-  if(!is_string($out)||!is_string($err)) return ['status'=>'unknown','output'=>null,'reason'=>'output_read_failed'];
-  if(strlen($out)>8192||strlen($err)>8192) return ['status'=>'unknown','output'=>null,'reason'=>'output_oversized'];
-  if(in_array($rc,[124,137,143],true)) return ['status'=>'unknown','output'=>null,'reason'=>'timeout'];
-  if($rc!==0) return ['status'=>'unknown','output'=>null,'reason'=>'command_failed'];
-  return ['status'=>'success','output'=>trim($out),'reason'=>null];
- }finally{directadmin_terminal_restore_cwd($restore);}
 }
 function directadmin_git_probe_output($probe){
  if(!is_array($probe)||($probe['status']??null)!=='success'||!array_key_exists('output',$probe)||!is_string($probe['output'])) return null;
@@ -1020,12 +1000,6 @@ function run_cmd($cmd,$cwd){
  $environment=['PATH'=>'/usr/local/bin:/usr/bin:/bin','HOME'=>home_dir()];
  if(strtolower($parts[0])==='git'){
   return ['Git inspection is unavailable while repository configuration isolation is pending.',126,'READ'];
-  $context=directadmin_git_repository_context($cwd);
-  if($context===null) return ['Blocked by Developer Portal policy [READ]: Git worktree and metadata must resolve inside the account HOME.',126,'READ'];
-   $programParts=directadmin_git_command_args($context,array_slice($parts,1));
-   if($programParts===null) return ['Blocked by Developer Portal policy [READ]: Repository Git filter configuration is not supported for account-terminal execution.',126,'READ'];
-  $cwd=$context['root'];
-  $environment=directadmin_git_environment();
  }
  $argv=array_merge(['/usr/bin/env','timeout','30s'],$programParts);
  $spec=[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']];
@@ -1316,7 +1290,7 @@ html,body{background:transparent;color:var(--tda-text);font-family:Inter,system-
  }
  echo '</div>';
  if($canMutate) {
- echo '<div class="card"><h3>Scoped terminal</h3><p class="muted">Pathless identity, runtime, disk and exact read-only Git diagnostics only. Direct file/directory inspection, PHP lint, builds/tests, shell chaining, redirection, package installation, Git mutation, destructive and privileged commands are blocked.</p><form method="post" action="?pipe_post=yes"><input type="hidden" name="csrf" value="'.h($token).'"><label>Working directory</label><input name="cwd" value="'.h($cwd).'"><label>Command</label><textarea name="command" rows="3" placeholder="git status"></textarea><button name="run" value="1">Run</button></form>';
+ echo '<div class="card"><h3>Scoped terminal</h3><p class="muted">Pathless identity, runtime and disk diagnostics only. Git inspection is temporarily unavailable pending immutable repository-configuration isolation. Direct file/directory inspection, PHP lint, builds/tests, shell chaining, redirection, package installation, Git mutation, destructive and privileged commands are blocked.</p><form method="post" action="?pipe_post=yes"><input type="hidden" name="csrf" value="'.h($token).'"><label>Working directory</label><input name="cwd" value="'.h($cwd).'"><label>Command</label><textarea name="command" rows="3" placeholder="git status (temporarily unavailable)"></textarea><button name="run" value="1">Run</button></form>';
  if($rc!==null) echo '<p>Class: '.h($commandClass).' · Exit code: '.h($rc).'</p><div class="term">'.h($output).'</div>'; echo '</div>';
  } else {
   echo '<div class="card"><h3>Operator actions</h3><p class="muted">Terminal and SSH key mutation are available only on the DirectAdmin admin route. This role is intentionally read-only.</p></div>';
