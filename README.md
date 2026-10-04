@@ -338,6 +338,18 @@ pnpm db:migrate
 pnpm dev:web
 ```
 
+## Recorded test evidence · 4 October 2026
+
+Focused developer-local execution exercised the platform's authority and company boundaries:
+
+- **User route/session lifecycle: 14/14 passed.** Actual PATCH/DELETE handlers and the canonical SQLite session registry covered demotion/revocation, preservation of company B, sanitized stale-context rejection and revoked-status retention.
+- **DirectAdmin workforce owners: 12/12 passed.** Checks covered reassignment, current authority, denial/revocation/expiry, replay, cross-company isolation, cancellation uncertainty, Finance composition and Communications boundaries.
+- **Communications reader: 5/5 passed.** Checks covered company-filtered reads, malformed/foreign-row isolation and provider acknowledgement remaining unverified.
+
+**These are developer-local results.** The tested implementation commits remain unpublished and the runs used temporary execution overlays. Clean-checkout reproduction, CI for those revisions and live-host verification remain pending.
+
+The [detailed evidence record](docs/working/2026-10-04-local-test-evidence.md) includes commands, environment versions, local revision identifiers, older public source references, the separately reported 116-test hierarchy/lifecycle/roadmap batch, and verification limits. Results are not combined into a security score or a product-readiness claim.
+
 ## Quality gates
 
 Run the complete repository gate:
