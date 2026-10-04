@@ -33,6 +33,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @titan-zero/workforce typecheck
       - run: pnpm --filter @titan-zero/workforce test
+      - name: Focused native Workforce contract lane
+        run: pnpm --filter @titan-zero/titan-platform test:workforce-native
       - name: Focused company-native storage typecheck and tests
         run: |
           pnpm --filter @titan-zero/storage typecheck
