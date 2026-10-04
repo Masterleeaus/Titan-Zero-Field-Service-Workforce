@@ -1055,7 +1055,7 @@ test('Channels renderer paints only one validated fresh response and clears on i
   let requests = 0;
   const endpoint = { endpoint_id: 'email-1', company_id: 'company-a', channel_type: 'email', provider_id: 'provider.mail', account_ref: 'acct-ref', direction: 'bidirectional', capabilities: ['text'], credential_ref: null, lifecycle: 'ACTIVE', health: 'healthy', last_checked_at: new Date().toISOString(), webhook: { configured: true, signature_required: true, replay_protection: true }, quota: { remaining: 10, reset_at: null }, locality: 'AU', provenance: 'canonical-connectors' };
   const base = { schema: 'titan.directadmin.channels.projection/v1', company_id: 'company-a', endpoints: [endpoint], topology: [{ endpoint_id: 'email-1', consumers: ['communications'] }], authority_granted: false, credentials_exposed: false };
-  let current = { data: base, source: 'canonical', freshness: new Date().toISOString(), evidence_refs: [] };
+  let current = { company_id: 'company-a', data: base, source: 'canonical', freshness: new Date().toISOString(), evidence_refs: [] };
   const session = { subscribe(fn) { listener = fn; return () => { listener = null; }; }, projection: async () => { requests++; if (current === 'outage') throw new Error('offline'); return current; } };
   const r = root();
   const mount = mountDirectAdminProjection(session, {
@@ -1073,6 +1073,8 @@ test('Channels renderer paints only one validated fresh response and clears on i
     'outage',
   ]) { current = value; await mount.refresh(); assert.equal(r.children[3].children.length, 0); }
   assert.equal(requests, 7);
+  current = { company_id: 'company-a', data: base, source: 'canonical', freshness: new Date().toISOString(), evidence_refs: [] };
+  await mount.refresh(); assert.equal(r.children[3].children.length, 1); assert.equal(requests, 8);
   listener(); assert.equal(r.children[3].children.length, 0);
   mount.dispose();
 });
