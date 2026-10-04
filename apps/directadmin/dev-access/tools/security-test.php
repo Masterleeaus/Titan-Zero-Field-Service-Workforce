@@ -582,7 +582,7 @@ expect_true($safeExternalDiffExit===0&&$safeExternalDiffError===''&&$safeExterna
 expect_true(!is_file($externalMarker),'bounded Git diff must not execute repository-configured external diff');
 $linkedWorktree=$home.'/linked-contained';
 expect_true(run_security_git_fixture(['-C',$gitRepo,'-c','user.name=Developer Portal Security Test','-c','user.email=dev-portal-security-test@example.invalid','commit','--allow-empty','--quiet','--message','linked worktree fixture'],$home),'synthetic repository must have a commit for linked-worktree coverage');
-expect_true(run_security_git_fixture(['-C',$gitRepo,'worktree','add','--detach','--quiet',$linkedWorktree,'HEAD'],$home),'HOME-contained linked worktree must be created for the positive regression');
+expect_true(run_security_git_fixture(['-C',$gitRepo,'-c','filter.synthetic-process.process=','-c','filter.synthetic-process.required=false','worktree','add','--detach','--quiet',$linkedWorktree,'HEAD'],$home),'HOME-contained linked worktree must be created for the positive regression');
 expect_true(is_file($linkedWorktree.'/.git'),'linked worktree must use DirectAdmin Git pointer-file layout');
 $linkedGitDir=directadmin_git_read_pointer($linkedWorktree.'/.git','gitdir',$linkedWorktree,$home,true);
 expect_true($linkedGitDir!==null,'linked worktree gitdir pointer must resolve within HOME');
