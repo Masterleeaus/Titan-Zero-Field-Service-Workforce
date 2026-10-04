@@ -6,7 +6,7 @@ import { tsImport } from 'tsx/esm/api';
 const sdk = await tsImport('../src/directadmin-plugin.ts', { parentURL: import.meta.url, tsconfig: false });
 const security = await tsImport('../src/security-boundary.ts', { parentURL: import.meta.url, tsconfig: false });
 const { DirectAdminSessionBridge, createDirectAdminGateway, DirectAdminCockpitSession,
-  directAdminBridgeFailureKind, redactDirectAdminDiagnostics } = sdk;
+  directAdminBridgeFailureKind, redactDirectAdminDiagnostics, mountDirectAdminProjection, assertChannelsProjection } = sdk;
 const { createSessionCredentialService, createSessionCredentialVerifier, directAdminIssuer } = security;
 const { mountZeroCore } = await tsImport('../../../apps/directadmin/zero-core/cockpit.mjs', { parentURL: import.meta.url, tsconfig: false });
 const { mountOperationsHub } = await tsImport('../../../apps/directadmin/operations-hub/cockpit.mjs', { parentURL: import.meta.url, tsconfig: false });
@@ -1049,6 +1049,35 @@ function root() {
     addEventListener() {}, removeEventListener() {}, ownerDocument: doc }) };
   return doc.createElement('section');
 }
+
+test('Channels renderer paints only one validated fresh response and clears on invalidation', async () => {
+  let listener;
+  let requests = 0;
+  const endpoint = { endpoint_id: 'email-1', company_id: 'company-a', channel_type: 'email', provider_id: 'provider.mail', account_ref: 'acct-ref', direction: 'bidirectional', capabilities: ['text'], credential_ref: null, lifecycle: 'ACTIVE', health: 'healthy', last_checked_at: new Date().toISOString(), webhook: { configured: true, signature_required: true, replay_protection: true }, quota: { remaining: 10, reset_at: null }, locality: 'AU', provenance: 'canonical-connectors' };
+  const base = { schema: 'titan.directadmin.channels.projection/v1', company_id: 'company-a', endpoints: [endpoint], topology: [{ endpoint_id: 'email-1', consumers: ['communications'] }], authority_granted: false, credentials_exposed: false };
+  let current = { company_id: 'company-a', data: base, source: 'canonical', freshness: new Date().toISOString(), evidence_refs: [] };
+  const session = { subscribe(fn) { listener = fn; return () => { listener = null; }; }, projection: async () => { requests++; if (current === 'outage') throw new Error('offline'); return current; } };
+  const r = root();
+  const mount = mountDirectAdminProjection(session, {
+    plugin_id: 'titan_channels', title: 'Channels', root: r, expected_schema: 'titan.directadmin.channels.projection/v1',
+    summarize: ({ company_id, data }) => { assertChannelsProjection(data, company_id); return 'ready'; },
+    render: (_projection, target) => { const item = target.ownerDocument.createElement('p'); item.textContent = 'endpoint'; target.replaceChildren(item); },
+  });
+  await mount.refresh(); assert.equal(r.children[3].children.length, 1); assert.equal(requests, 1);
+  for (const value of [
+    { ...current, freshness: null },
+    { ...current, freshness: new Date(Date.now() - 600_000).toISOString() },
+    { ...current, data: { ...base, endpoints: [{ ...endpoint, company_id: 'company-b' }] } },
+    { ...current, data: { ...base, endpoints: [{ ...endpoint, health: 'revoked' }] } },
+    { ...current, data: { ...base, schema: 'wrong' } },
+    'outage',
+  ]) { current = value; await mount.refresh(); assert.equal(r.children[3].children.length, 0); }
+  assert.equal(requests, 7);
+  current = { company_id: 'company-a', data: base, source: 'canonical', freshness: new Date().toISOString(), evidence_refs: [] };
+  await mount.refresh(); assert.equal(r.children[3].children.length, 1); assert.equal(requests, 8);
+  listener(); assert.equal(r.children[3].children.length, 0);
+  mount.dispose();
+});
 
 test('three real consumer modules share signed-session gateway over disposable HTTP and purge together', async t => {
   const f = await fixture(t); const gateway = createDirectAdminGateway(f.bridge, f.owners, bootstrapProviderFor(f, 'three-consumers'));

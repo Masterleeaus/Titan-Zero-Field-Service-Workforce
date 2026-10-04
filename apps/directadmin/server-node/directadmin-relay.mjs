@@ -24,6 +24,7 @@ export const ROUTES = Object.freeze({
   "titan-web-intents": Object.freeze({ method: "POST", path: "/v1/directadmin/titan_web/intents", body: "intent" }),
   "workforce-projection": Object.freeze({ method: "GET", path: "/v1/directadmin/titan_workforce/projection", body: "none" }),
   "workforce-intents": Object.freeze({ method: "POST", path: "/v1/directadmin/titan_workforce/intents", body: "intent" }),
+  "titan-channels-projection": Object.freeze({ method: "GET", path: "/v1/directadmin/titan_channels/projection", body: "none" }),
 });
 
 const responseHeaders = Object.freeze({

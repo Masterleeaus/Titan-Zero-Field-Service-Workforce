@@ -1,5 +1,5 @@
 const endpoint = "/CMD_PLUGINS/titan-server-node/directadmin-gateway.raw";
-const plugins = ["titan_zero", "titan_operations", "titan_web", "titan_workforce"];
+const plugins = ["titan_zero", "titan_operations", "titan_web", "titan_workforce", "titan_channels"];
 const routes = new Map([
   ["/v1/directadmin/bootstrap", { route: "bootstrap", method: "POST", bootstrap: true }],
   ["/v1/directadmin/context", { route: "context", method: "GET" }],
