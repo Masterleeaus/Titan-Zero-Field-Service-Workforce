@@ -1,39 +1,8 @@
-1ëa¡Ñ1qêmŠ‰ÂjyèµÊ'½êíj¸.™éí¢WB…ªðŠØoj[ž~ŠÑz™Zqëh·*^K+-z`¡j°šžz-r‰ïz»oj[ž¶‹r¥ä²²×¦
-«ºè­+kŠx&ºË[yìZrÙr¢wœ…ªÚr×«–‰àimport * as SDK from 'titan-sdk';
-
-const root = document.getElementById('titan-channels');
-const status = root?.querySelector('[role="status"]');
-
-function summarize({ company_id, data }) {
-  SDK.assertChannelsProjection(data, company_id);
-  const attention = data.endpoints.filter((endpoint) => endpoint.health !== 'healthy' || endpoint.lifecycle !== 'ACTIVE').length;
-  return `${data.endpoints.length} endpoints Â· ${attention} need attention Â· credentials references only Â· authority not carried`;
-}
-
-function render(projection, target) {
+import * as SDK from 'titan-sdk';\n\nconst root = document.getElementById('titan-channels');\nconst status = root?.querySelector('[role="status"]');\n\nfunction summarize({ company_id, data }) {\n  SDK.assertChannelsProjection(data, company_id);\n  const attention = data.endpoints.filter((endpoint) => endpoint.health !== 'healthy' || endpoint.lifecycle !== 'ACTIVE').length;\n  return `${data.endpoints.length} endpoints Â· ${attention} need attention Â· credentials references only Â· authority not carried`;\n}\n\nfunction render(projection, target) {
   const list = target.ownerDocument.createElement('ul');
-  for (const endpoint of projection.data.endpoints) {
-    const item = document.createElement('li');
-    item.textContent = `${endpoint.channel_type} / ${endpoint.provider_id} â€” ${endpoint.health} â€” ${endpoint.lifecycle}`;
-    list.append(item);
-  }
-  target.replaceChildren(list);
-}
-
-async function start() {
-  if (!root || !status) return;
-  try {
-    const relay = await import('/CMD_PLUGINS/titan-server-node/images/directadmin-relay-client.mjs');
-    const session = new SDK.DirectAdminCockpitSession(
-      () => document.querySelector('meta[name="titan-directadmin-csrf"]')?.getAttribute('content') ?? '', relay.createDirectAdminRelayFetch());
-    const mounted = SDK.mountDirectAdminProjection(session, {
-      plugin_id: 'titan_channels', title: 'Channels', root,
-      expected_schema: 'titan.directadmin.channels.projection/v1', summarize, render,
+  for (const endpoint of projection.data.endpoints) {\n    const item = document.createElement('li');\n    item.textContent = `${endpoint.channel_type} / ${endpoint.provider_id} â€” ${endpoint.health} â€” ${endpoint.lifecycle}`;\n    list.append(item);\n  }\n  target.replaceChildren(list);
+}\n\nasync function start() {\n  if (!root || !status) return;\n  try {\n    const relay = await import('/CMD_PLUGINS/titan-server-node/images/directadmin-relay-client.mjs');\n    const session = new SDK.DirectAdminCockpitSession(\n      () => document.querySelector('meta[name="titan-directadmin-csrf"]')?.getAttribute('content') ?? '', relay.createDirectAdminRelayFetch());
+    const mounted = SDK.mountDirectAdminProjection(session, {\n      plugin_id: 'titan_channels', title: 'Channels', root,\n      expected_schema: 'titan.directadmin.channels.projection/v1', summarize, render,
     });
     window.addEventListener('pagehide', () => { mounted.dispose(); session.dispose(); }, { once: true });
-    window.addEventListener('titan-context-changed', () => { session.invalidate(); void mounted.refresh(); });
-    await session.connect();
-    await mounted.refresh();
-  } catch { status.textContent = 'Read-only - authenticated DirectAdmin session or Channels projection unavailable.'; }
-}
-void start();
+    window.addEventListener('titan-context-changed', () => { session.invalidate(); void mounted.refresh(); });\n    await session.connect();\n    await mounted.refresh();\n  } catch { status.textContent = 'Read-only - authenticated DirectAdmin session or Channels projection unavailable.'; }\n}\nvoid start();\n

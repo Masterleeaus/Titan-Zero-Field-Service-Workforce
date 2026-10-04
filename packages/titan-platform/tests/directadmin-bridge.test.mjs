@@ -1050,6 +1050,27 @@ function root() {
   return doc.createElement('section');
 }
 
+test('Channels renderer only paints one validated fresh response and clears on invalidation', async () => {
+  let listener;
+  let current = { data: { schema: 'titan.directadmin.channels.projection/v1', company_id: 'company-a', endpoints: [] }, source: 'canonical', freshness: new Date().toISOString(), evidence_refs: [] };
+  const session = { subscribe(fn) { listener = fn; return () => { listener = null; }; }, projection: async () => { if (current === 'outage') throw new Error('offline'); return current; } };
+  const r = root();
+  const mount = mountDirectAdminProjection(session, {
+    plugin_id: 'titan_channels', title: 'Channels', root: r, expected_schema: 'titan.directadmin.channels.projection/v1',
+    summarize: () => 'ready',
+    render: (_projection, target) => { const item = target.ownerDocument.createElement('p'); item.textContent = 'endpoint'; target.replaceChildren(item); },
+  });
+  await mount.refresh(); assert.equal(r.children[3].children.length, 1);
+  for (const value of [
+    { ...current, freshness: null },
+    { ...current, freshness: new Date(Date.now() - 600_000).toISOString() },
+    { ...current, data: { ...current.data, schema: 'wrong' } },
+    'outage',
+  ]) { current = value; await mount.refresh(); assert.equal(r.children[3].children.length, 0); }
+  listener(); assert.equal(r.children[3].children.length, 0);
+  mount.dispose();
+});
+
 test('three real consumer modules share signed-session gateway over disposable HTTP and purge together', async t => {
   const f = await fixture(t); const gateway = createDirectAdminGateway(f.bridge, f.owners, bootstrapProviderFor(f, 'three-consumers'));
   const server = createServer(async (incoming, outgoing) => {

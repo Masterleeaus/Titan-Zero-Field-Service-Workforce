@@ -1,17 +1,5 @@
-1ëa¡Ñ1qêmŠ‰ÂjyèµÊ'½êíj¸.™éí¢WB…ªðŠØoj[ž~ŠÑz™Zqëh·*^K+-z`¡j°šžz-r‰ïz»oj[ž¶‹r¥ä²²×¦
-«ºè­+kŠx&ºË[yìZrÙr¢wœ…ªÚr×«–‰àimport test from 'node:test';
-import assert from 'node:assert/strict';
-import { renderEntry } from '../lib/entry.mjs';
-
-test('renders all DirectAdmin role entry documents with an SDK slot', () => {
-  for (const role of ['admin', 'reseller', 'user']) {
-    const html = renderEntry(role, { sdkModule: 'export const fixture = true;' });
-    assert.match(html, /titan-channels/);
-    assert.match(html, /titan-sdk/);
-    assert.match(html, /data:text\/javascript;base64,/);
-  }
-  assert.throws(() => renderEntry('root'), /unsupported DirectAdmin role/);
-});
+import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { renderEntry } from '../lib/entry.mjs';\n\ntest('renders all DirectAdmin role entry documents with an SDK slot', () => {
+  for (const role of ['admin', 'reseller', 'user']) {\n    const html = renderEntry(role, { sdkModule: 'export const fixture = true;' });\n    assert.match(html, /titan-channels/);\n    assert.match(html, /titan-sdk/);\n    assert.match(html, /data:text\/javascript;base64,/);\n  }\n  assert.throws(() => renderEntry('root'), /unsupported DirectAdmin role/);\n});
 
 test('renders the established host CSRF contract without inventing a browser nonce', () => {
   const html = renderEntry('admin', { sdkModule: 'export const fixture = true;' });
