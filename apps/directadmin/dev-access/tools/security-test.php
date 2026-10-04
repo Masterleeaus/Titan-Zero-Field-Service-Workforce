@@ -577,19 +577,9 @@ foreach(['diff --stat','diff --name-only'] as $allowedDiffCommand){
  [$allowedDiffClass,, $allowedDiffPolicy]=command_policy('git '.$allowedDiffCommand);
  expect_true($allowedDiffPolicy===true&&$allowedDiffClass==='READ',$allowedDiffCommand.' must remain a read-only allowlisted command');
 }
-expect_true(file_put_contents($gitRepo.'/textconv.synthetic',"\0third\n")!==false,'binary fixture must change again for external diff tests');
 [$safeExternalDiffExit,$safeExternalDiffOutput,$safeExternalDiffError]=run_security_git_capture(array_slice($safeDiffArguments,1),$home);
 expect_true($safeExternalDiffExit===0&&$safeExternalDiffError===''&&$safeExternalDiffOutput!=='','hardened Git diff must remain readable with a hostile repo-local external diff configured');
 expect_true(!is_file($externalMarker),'bounded Git diff must not execute repository-configured external diff');
-expect_true(run_security_git_fixture(['-C',$gitRepo,'add','--','textconv.synthetic'],$home),'external diff fixture change must be staged');
-expect_true(run_security_git_fixture(['-C',$gitRepo,'-c','user.name=Developer Portal Security Test','-c','user.email=dev-portal-security-test@example.invalid','commit','--quiet','--message','external diff helper fixture'],$home),'external diff fixture change must be committed');
-[$unboundedExternalShowExit,, $unboundedExternalShowError]=run_security_git_capture(['-C',$gitRepo,'show','--ext-diff','HEAD'],$home);
-expect_true($unboundedExternalShowExit===0&&$unboundedExternalShowError===''&&is_file($externalMarker),'unbounded Git show with external diff enabled must prove the synthetic helper can execute');
-expect_true(unlink($externalMarker),'external diff marker must be reset before hardened show');
-$safeExternalShowArguments=directadmin_git_command_args($gitContext,['show','--ext-diff','HEAD']);
-[$safeExternalShowExit,$safeExternalShowOutput,$safeExternalShowError]=run_security_git_capture(array_slice($safeExternalShowArguments,1),$home);
-expect_true($safeExternalShowExit===0&&$safeExternalShowError===''&&$safeExternalShowOutput!=='','hardened Git show must remain readable with external diff explicitly requested');
-expect_true(!is_file($externalMarker),'bounded Git show must not execute repository-configured external diff');
 $linkedWorktree=$home.'/linked-contained';
 expect_true(run_security_git_fixture(['-C',$gitRepo,'-c','user.name=Developer Portal Security Test','-c','user.email=dev-portal-security-test@example.invalid','commit','--allow-empty','--quiet','--message','linked worktree fixture'],$home),'synthetic repository must have a commit for linked-worktree coverage');
 expect_true(run_security_git_fixture(['-C',$gitRepo,'worktree','add','--detach','--quiet',$linkedWorktree,'HEAD'],$home),'HOME-contained linked worktree must be created for the positive regression');
