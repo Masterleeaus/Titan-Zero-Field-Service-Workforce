@@ -330,13 +330,25 @@ Titan Zero is primarily a TypeScript system built with a modern full-stack stack
 
 ### Start locally
 
+The default clean-checkout path is SQLite; the checked-in development Compose file defines PostgreSQL only.
+
 ```bash
 cp .env.example .env
 pnpm install
-docker compose -f infra/compose.dev.yml up -d postgres redis
 pnpm db:migrate
 pnpm dev:web
 ```
+
+### Public flagship verification
+
+The bounded native Workforce contract slice has an exact, credential-free test command:
+
+```bash
+pnpm --filter @titan-zero/titan-platform test:workforce-native
+```
+
+It compiles `packages/titan-platform/src/workforce-native/` into a temporary test output and runs the selected contract, six-agent, workflow, and Pass10 parity tests under `packages/titan-platform/tests/`. The lane verifies company boundaries and authority-neutral planning; it does not provision a provider, live host, or execution authority. GitHub Actions runs the same command in `.github/workflows/workforce-verification.yml`.
+
 
 ## Recorded test evidence · 4 October 2026
 
