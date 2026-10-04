@@ -383,3 +383,7 @@ Current authority follows this order:
 **Active development.**
 
 Titan Zero Field Service Workforce is being developed as a managed Advanced Intelligence workforce for field-service businesses, with progressive automation, device and provider flexibility, explicit authority boundaries, and continuously extensible operational capabilities.
+
+## Engineering guide
+
+See [docs/PORTFOLIO.md](docs/PORTFOLIO.md) for the repository-specific code map, quickstart, evidence boundaries, and limitations.
