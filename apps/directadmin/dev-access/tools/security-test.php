@@ -569,7 +569,9 @@ expect_true(run_security_git_fixture(['-C',$gitRepo,'config','diff.external',$ex
 foreach(['diff --stat','diff --name-only'] as $allowedDiffCommand){
  $textconvMarkerPresent=is_file($textconvMarker);
  if($textconvMarkerPresent) expect_true(unlink($textconvMarker),'textconv marker must be cleared before '.$allowedDiffCommand);
- [$allowedDiffExit,$allowedDiffOutput,$allowedDiffError]=run_security_git_capture(array_merge(['-C',$gitRepo],preg_split('/\\s+/',$allowedDiffCommand)),$home);
+ $allowedDiffArguments=directadmin_git_command_args($gitContext,preg_split('/\\s+/',$allowedDiffCommand));
+ expect_true(is_array($allowedDiffArguments),'bounded '.$allowedDiffCommand.' arguments must be available');
+ [$allowedDiffExit,$allowedDiffOutput,$allowedDiffError]=run_security_git_capture(array_slice($allowedDiffArguments,1),$home);
  expect_true($allowedDiffExit===0&&$allowedDiffError===''&&$allowedDiffOutput!=='','repo-configured external helper must not break '.$allowedDiffCommand);
  expect_true(!is_file($externalMarker)&&!is_file($textconvMarker),$allowedDiffCommand.' must not execute repository-configured external or textconv helpers');
  [$allowedDiffClass,, $allowedDiffPolicy]=command_policy('git '.$allowedDiffCommand);
