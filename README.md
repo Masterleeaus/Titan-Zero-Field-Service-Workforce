@@ -53,7 +53,7 @@ The focused native workforce evaluator is runnable without provider credentials 
 pnpm --filter @titan-zero/titan-platform test:workforce-native
 ```
 
-It compiles the native Workforce source and exercises the selected contract, six-agent, workflow, and parity checks. The same lane is published in the [Workforce Verification workflow](.github/workflows/workforce-verification.yml); the merged exact-head run is the public evidence for this bounded slice.
+It compiles the native Workforce source and exercises the selected contract, six-agent, workflow, and parity checks. The [Workforce Verification workflow](.github/workflows/workforce-verification.yml) defines and publishes this focused lane; run it at the exact head before treating current verification as evidence.
 
 The repository also retains broader local evidence for route/session, DirectAdmin owner, and communications checks. Those results are scoped observations, not a combined security score, coverage claim, or production certification.
 
