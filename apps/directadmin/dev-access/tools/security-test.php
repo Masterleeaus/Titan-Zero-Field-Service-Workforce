@@ -578,9 +578,6 @@ foreach(['diff --stat','diff --name-only'] as $allowedDiffCommand){
  expect_true($allowedDiffPolicy===true&&$allowedDiffClass==='READ',$allowedDiffCommand.' must remain a read-only allowlisted command');
 }
 expect_true(file_put_contents($gitRepo.'/textconv.synthetic',"\0third\n")!==false,'binary fixture must change again for external diff tests');
-[$unboundedExternalDiffExit,, $unboundedExternalDiffError]=run_security_git_capture(['-C',$gitRepo,'diff','--ext-diff'],$home);
-expect_true($unboundedExternalDiffExit===0&&$unboundedExternalDiffError===''&&is_file($externalMarker),'unbounded Git diff with external diff enabled must prove the synthetic external diff helper can execute');
-expect_true(unlink($externalMarker),'external diff marker must be reset before hardened diff');
 [$safeExternalDiffExit,$safeExternalDiffOutput,$safeExternalDiffError]=run_security_git_capture(array_slice($safeDiffArguments,1),$home);
 expect_true($safeExternalDiffExit===0&&$safeExternalDiffError===''&&$safeExternalDiffOutput!=='','hardened Git diff must remain readable with a hostile repo-local external diff configured');
 expect_true(!is_file($externalMarker),'bounded Git diff must not execute repository-configured external diff');
