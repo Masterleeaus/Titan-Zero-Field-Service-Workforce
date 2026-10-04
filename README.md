@@ -8,15 +8,53 @@
 
 **Governed AI workforce for field-service operations**
 
+## Overview
+
 Titan Zero Field Service Workforce is a TypeScript operating platform for companies that coordinate office teams, field workers, customers, and connected systems. It combines scheduling, dispatch, work execution, customer care, authority controls, and evidence into one company-scoped workflow.
 
 The platform is designed for operations teams that need intelligent assistance to move work forward while keeping every consequential action attributable, reviewable, and reversible.
+
+
+## Measured evidence
+
+This repository currently has **focused verification**, not a single benchmark that proves end-to-end production readiness.
+
+| Evidence | Current status | Reproduce / inspect |
+| --- | --- | --- |
+| Native workforce contract lane | **Runnable from a clean checkout** | `pnpm --filter @titan-zero/titan-platform test:workforce-native` |
+| Six native agent maps | **Implemented** | `packages/titan-platform/src/workforce-native/contracts.ts` |
+| Runtime authority revalidation | **Implemented in source** | `packages/runtime/authority/runtime-authority-gateway.mjs` |
+| Broader route/session/communications checks | **Recorded as scoped local evidence** | repository docs and focused tests |
+| Live DirectAdmin commissioning / provider delivery | **Environment-dependent** | not claimed by repository-only verification |
+| Full production readiness | **Not claimed** | requires exact-head deployment evidence |
+
+The focused workforce command compiles the native workforce source and exercises contract, agent-map, workflow, and parity checks without requiring provider credentials or live authority. The [Workforce Verification workflow](.github/workflows/workforce-verification.yml) is the canonical CI lane for this evidence.
+
+## What is new
+
+The technical signature is a **company-scoped AI workforce in which identity, recommendation, authority, execution, and evidence are separate states**.
+
+| Mechanism | Engineering distinction | Primary implementation |
+| --- | --- | --- |
+| **Native role contracts** | Reception, Sales, Booking, Scheduling, Jobs, and Customer Care have explicit operations, handoff targets, and ownership instead of prompt-only personas. | `packages/titan-platform/src/workforce-native/contracts.ts` |
+| **Company-scoped truth** | Native maps bind to `company_id` and explicitly reject identity as an authority grant. | workforce-native contracts |
+| **Authority revalidation at execution** | Consequential execution rechecks company, capability, actor, and idempotency context immediately before the execution gateway. | `packages/runtime/authority/runtime-authority-gateway.mjs` |
+| **Existing operational APIs as source of truth** | Workforce maps point to booking, estimate, property, job, visit, work-order, and user APIs instead of creating parallel business state. | platform/runtime adapters |
+| **Recoverable hosted runtime** | Readiness, conversations, bounded adapters, storage checks, and recovery paths are explicit runtime concerns. | `services/workforce/src/server.ts` |
+
+### Evidence status
+
+- **Implemented:** native role maps, company-scoped contracts, hosted workforce runtime, operational adapters, and authority gateway.
+- **Focused verification available:** native workforce compile/contract/workflow/parity lane.
+- **Environment-dependent:** provider credentials, DirectAdmin forwarding, live delivery, upstream services, and deployment commissioning.
+- **Not claimed:** blanket production readiness or a repository-wide security score.
+
 
 <p align="center">
   <img src="docs/images/F2BED790-8EF0-473B-988E-F42E9488B1AE.png" alt="Titan Zero field service workforce operating model" width="100%" />
 </p>
 
-## What the workforce coordinates
+## Verified capabilities
 
 - **Six native agent roles:** Reception, Sales, Booking, Scheduling, Jobs, and Customer Care are explicit maps in `packages/titan-platform/src/workforce-native/contracts.ts`, each with named operations, handoff targets, and canonical Business Ops ownership.
 - **Company-scoped business truth:** Every native agent map declares `company_id` as its boundary and `identityGrantsAuthority: false`; identity can provide context, but it does not authorize an action by itself.
