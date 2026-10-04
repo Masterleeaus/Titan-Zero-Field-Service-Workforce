@@ -11,7 +11,7 @@ const endpoint = (company_id = 'company-a') => ({
 });
 
 test('accepts a company-scoped channel projection without credential material', () => {
-  const projection = { schema: 'titan.directadmin.channels.projection/v1', company_id: 'company-a', endpoints: [endpoint()], topology: [{ endpoint_id: 'email-1', consumers: ['communications'] }], authority_granted: false, credentials_exposed: false };
+  const projection = { schema: 'titan.directadmin.channels.projection/v1', company_id: 'company-a', endpoints: [{ ...endpoint(), credential_ref: null }], topology: [{ endpoint_id: 'email-1', consumers: ['communications'] }], authority_granted: false, credentials_exposed: false };
   assert.doesNotThrow(() => assertChannelsProjection(projection, 'company-a'));
 });
 
@@ -20,4 +20,6 @@ test('rejects cross-company projections and unsafe endpoint state', () => {
   assert.throws(() => assertChannelsProjection(projection, 'company-a'), /company|projection/);
   const revoked = { ...projection, endpoints: [{ ...endpoint(), health: 'revoked', lifecycle: 'ACTIVE' }] };
   assert.throws(() => assertChannelsProjection(revoked, 'company-a'), /endpoint/);
+  const invalidEnum = { ...projection, endpoints: [{ ...endpoint(), lifecycle: 'NOT_A_STATE' }] };
+  assert.throws(() => assertChannelsProjection(invalidEnum, 'company-a'), /endpoint/);
 });

@@ -350,6 +350,24 @@ test("extracted RAW module core maps Workforce projection and strips unrelated D
   assert.equal(request.body.length, 0);
 });
 
+test("extracted RAW module maps the read-only Channels projection and preserves company context", async (t) => {
+  const f = await fixture(t);
+  const { env, input } = cgi(f, { route: "titan-channels-projection" });
+  const response = await runFixtureCore(f, env, input);
+  assert.equal(response.status, 200);
+  assert.equal(f.requests[0].path, "/v1/directadmin/titan_channels/projection");
+  assert.equal(f.requests[0].headers.cookie, DIRECTADMIN_SESSION_COOKIE + "=session-fixture-secret");
+  assert.equal(f.requests[0].headers["x-titan-company-id"], undefined);
+});
+
+test("Channels relay rejects an unauthenticated browser request before the upstream gateway", async (t) => {
+  const f = await fixture(t);
+  const { env, input } = cgi(f, { route: "titan-channels-projection", browserCookie: "da_session=authenticated" });
+  const response = await runFixtureCore(f, env, input);
+  assert.equal(response.status, 401);
+  assert.equal(f.requests.length, 0);
+});
+
 test("POST intent uses pipe_post stdin and preserves only approved SDK headers/body", async (t) => {
   const f = await fixture(t, "clear-cookie");
   const body = JSON.stringify({

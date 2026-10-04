@@ -44,7 +44,12 @@ export function assertChannelsProjection(value: unknown, companyId: string): ass
     if (endpoint.company_id !== companyId || ids.has(endpoint.endpoint_id)) throw new Error('invalid-channel-company-or-duplicate');
     ids.add(text(endpoint.endpoint_id, 'endpoint-id')); text(endpoint.channel_type, 'type'); text(endpoint.provider_id, 'provider'); text(endpoint.account_ref, 'account-ref');
     if (!['inbound', 'outbound', 'bidirectional'].includes(endpoint.direction) || !Array.isArray(endpoint.capabilities) ||
-        !endpoint.credential_ref || endpoint.credential_ref.length > 512 || endpoint.webhook?.signature_required !== true ||
+        endpoint.capabilities.some((capability: unknown) => typeof capability !== 'string' || !capability.trim() || capability.length > 128) ||
+        (endpoint.credential_ref !== null && (typeof endpoint.credential_ref !== 'string' || !endpoint.credential_ref.trim() || endpoint.credential_ref.length > 512)) ||
+        !['DISCOVER', 'CONNECT', 'AUTHORIZE', 'CONFIGURE', 'TEST', 'VERIFY', 'ACTIVE', 'DEGRADED', 'PAUSED', 'REAUTH_REQUIRED', 'ROTATE', 'REBIND', 'DISCONNECT', 'RETIRE'].includes(endpoint.lifecycle) ||
+        !['healthy', 'degraded', 'unreachable', 'revoked', 'unknown'].includes(endpoint.health) ||
+        (endpoint.last_checked_at !== null && (typeof endpoint.last_checked_at !== 'string' || Number.isNaN(Date.parse(endpoint.last_checked_at)))) ||
+        typeof endpoint.webhook?.configured !== 'boolean' || endpoint.webhook?.signature_required !== true ||
         endpoint.webhook?.replay_protection !== true || endpoint.health === 'revoked' && endpoint.lifecycle === 'ACTIVE') {
       throw new Error('invalid-channel-endpoint');
     }

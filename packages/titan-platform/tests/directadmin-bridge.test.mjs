@@ -6,7 +6,7 @@ import { tsImport } from 'tsx/esm/api';
 const sdk = await tsImport('../src/directadmin-plugin.ts', { parentURL: import.meta.url, tsconfig: false });
 const security = await tsImport('../src/security-boundary.ts', { parentURL: import.meta.url, tsconfig: false });
 const { DirectAdminSessionBridge, createDirectAdminGateway, DirectAdminCockpitSession,
-  directAdminBridgeFailureKind, redactDirectAdminDiagnostics } = sdk;
+  directAdminBridgeFailureKind, redactDirectAdminDiagnostics, mountDirectAdminProjection } = sdk;
 const { createSessionCredentialService, createSessionCredentialVerifier, directAdminIssuer } = security;
 const { mountZeroCore } = await tsImport('../../../apps/directadmin/zero-core/cockpit.mjs', { parentURL: import.meta.url, tsconfig: false });
 const { mountOperationsHub } = await tsImport('../../../apps/directadmin/operations-hub/cockpit.mjs', { parentURL: import.meta.url, tsconfig: false });
@@ -1049,6 +1049,23 @@ function root() {
     addEventListener() {}, removeEventListener() {}, ownerDocument: doc }) };
   return doc.createElement('section');
 }
+
+test('shared projection renderer clears plugin content when the session invalidates', async () => {
+  let listener;
+  const projection = { data: { schema: 'titan.directadmin.channels.projection/v1', label: 'company-a' }, source: 'canonical', freshness: new Date().toISOString(), evidence_refs: [] };
+  const session = { subscribe(fn) { listener = fn; return () => { listener = null; }; }, projection: async () => projection };
+  const r = root();
+  const mount = mountDirectAdminProjection(session, {
+    plugin_id: 'titan_channels', title: 'Channels', root: r,
+    expected_schema: 'titan.directadmin.channels.projection/v1', summarize: () => 'ready',
+    render: (value, target) => { const item = target.ownerDocument.createElement('p'); item.textContent = value.data.label; target.replaceChildren(item); },
+  });
+  await mount.refresh();
+  assert.equal(r.children[3].children[0].textContent, 'company-a');
+  listener();
+  assert.equal(r.children[3].children.length, 0);
+  mount.dispose();
+});
 
 test('three real consumer modules share signed-session gateway over disposable HTTP and purge together', async t => {
   const f = await fixture(t); const gateway = createDirectAdminGateway(f.bridge, f.owners, bootstrapProviderFor(f, 'three-consumers'));

@@ -216,20 +216,22 @@ export class DirectAdminCockpitSession {
 export function mountDirectAdminProjection(session: DirectAdminCockpitSession, input: {
   plugin_id: DirectAdminPluginId; title: string; root: HTMLElement; expected_schema: string;
   summarize: (projection: DirectAdminProjection) => string;
+  render?: (projection: DirectAdminProjection, target: HTMLElement) => void;
 }) {
   const doc = input.root.ownerDocument;
   const heading = doc.createElement('h2'); heading.textContent = input.title;
   const status = doc.createElement('p'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   const evidence = doc.createElement('pre');
+  const content = doc.createElement('div');
   const refresh = doc.createElement('button'); refresh.type = 'button'; refresh.textContent = 'Refresh';
-  input.root.replaceChildren(heading, status, evidence, refresh);
+  input.root.replaceChildren(heading, status, evidence, content, refresh);
   let generation = 0;
   const state = (name: string, text: string) => { input.root.setAttribute('data-state', name); status.textContent = text; };
-  const clear = () => { generation++; state('read-only', 'Read-only — authenticate current company context'); evidence.textContent = ''; };
+  const clear = () => { generation++; state('read-only', 'Read-only - authenticate current company context'); evidence.textContent = ''; content.replaceChildren(); };
   const unsubscribe = session.subscribe(clear);
   const load = async () => {
     const current = ++generation;
-    state('loading', 'Loading'); evidence.textContent = '';
+    state('loading', 'Loading'); evidence.textContent = ''; content.replaceChildren();
     try {
       const projection = await session.projection(input.plugin_id);
       if (current !== generation) return;
@@ -241,6 +243,7 @@ export function mountDirectAdminProjection(session: DirectAdminCockpitSession, i
       else if (age > 300_000) state('stale', 'Read-only — projection is stale');
       else state('ready', input.summarize(projection));
       evidence.textContent = `Source: ${projection.source}\nFreshness: ${projection.freshness ?? 'unknown'}\nEvidence: ${projection.evidence_refs.join(', ') || 'unavailable'}`;
+      input.render?.(projection, content);
     } catch {
       if (current === generation) { state('unavailable', 'Read-only — projection unavailable'); evidence.textContent = ''; }
     }

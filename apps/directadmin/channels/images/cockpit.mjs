@@ -9,14 +9,14 @@ function summarize({ company_id, data }) {
   return `${data.endpoints.length} endpoints · ${attention} need attention · credentials references only · authority not carried`;
 }
 
-function render(projection) {
-  const list = document.createElement('ul');
+function render(projection, target) {
+  const list = target.ownerDocument.createElement('ul');
   for (const endpoint of projection.data.endpoints) {
     const item = document.createElement('li');
     item.textContent = `${endpoint.channel_type} / ${endpoint.provider_id} — ${endpoint.health} — ${endpoint.lifecycle}`;
     list.append(item);
   }
-  root?.append(list);
+  target.replaceChildren(list);
 }
 
 async function start() {
@@ -24,13 +24,11 @@ async function start() {
   try {
     const relay = await import('/CMD_PLUGINS/titan-server-node/images/directadmin-relay-client.mjs');
     const session = new SDK.DirectAdminCockpitSession(
-      () => document.querySelector('meta[name="titan-directadmin-bootstrap-nonce"]')?.content ?? '', relay.createDirectAdminRelayFetch());
+      () => document.querySelector('meta[name="titan-directadmin-csrf"]')?.getAttribute('content') ?? '', relay.createDirectAdminRelayFetch());
     const mounted = SDK.mountDirectAdminProjection(session, {
       plugin_id: 'titan_channels', title: 'Channels', root,
-      expected_schema: 'titan.directadmin.channels.projection/v1', summarize,
+      expected_schema: 'titan.directadmin.channels.projection/v1', summarize, render,
     });
-    const refresh = mounted.refresh;
-    mounted.refresh = async () => { await refresh(); try { render(await session.projection('titan_channels')); } catch { /* renderer owns read-only state */ } };
     window.addEventListener('pagehide', () => { mounted.dispose(); session.dispose(); }, { once: true });
     window.addEventListener('titan-context-changed', () => { session.invalidate(); void mounted.refresh(); });
     await session.connect();

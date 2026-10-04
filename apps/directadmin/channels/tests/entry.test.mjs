@@ -11,3 +11,9 @@ test('renders all DirectAdmin role entry documents with an SDK slot', () => {
   }
   assert.throws(() => renderEntry('root'), /unsupported DirectAdmin role/);
 });
+
+test('renders the established host CSRF contract without inventing a browser nonce', () => {
+  const html = renderEntry('admin', { sdkModule: 'export const fixture = true;' });
+  assert.match(html, /meta name="titan-directadmin-csrf" content=""/);
+  assert.doesNotMatch(html, /bootstrap-nonce/);
+});
