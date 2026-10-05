@@ -14,6 +14,17 @@ export type TitanNativeWorkforceOperation = Readonly<{
   mutating: boolean;
 }>;
 
+export type TitanNativeCleaningProfileBinding = Readonly<{
+  moduleId: "titan.workforce.cleaning";
+  profileId: string;
+  agentKey: TitanNativeWorkforceAgentKey;
+  responsibility: string;
+  allowedOperationIds: readonly string[];
+  autonomy: "suggest";
+  authorityGranted: false;
+  executionPermitted: false;
+}>;
+
 export type TitanNativeWorkforceAgentMap = Readonly<{
   agentKey: TitanNativeWorkforceAgentKey;
   displayName: string;
@@ -22,6 +33,7 @@ export type TitanNativeWorkforceAgentMap = Readonly<{
   canonicalBusinessTruth: "business_ops";
   donorModules: readonly string[];
   operations: readonly TitanNativeWorkforceOperation[];
+  cleaningProfileBinding: TitanNativeCleaningProfileBinding;
   handoffTargets: readonly TitanNativeWorkforceAgentKey[];
 }>;
 
@@ -34,6 +46,22 @@ const op = (
   purpose: string,
   mutating: boolean,
 ): TitanNativeWorkforceOperation => Object.freeze({ id, method, path, purpose, mutating });
+
+const cleaningBinding = (
+  agentKey: TitanNativeWorkforceAgentKey,
+  profileId: string,
+  responsibility: string,
+  allowedOperationIds: readonly string[],
+): TitanNativeCleaningProfileBinding => Object.freeze({
+  moduleId: "titan.workforce.cleaning",
+  profileId,
+  agentKey,
+  responsibility,
+  allowedOperationIds: Object.freeze([...allowedOperationIds]),
+  autonomy: "suggest",
+  authorityGranted: false,
+  executionPermitted: false,
+});
 
 export const TITAN_NATIVE_WORKFORCE_AGENT_MAP: Readonly<Record<TitanNativeWorkforceAgentKey, TitanNativeWorkforceAgentMap>> = Object.freeze({
   reception: Object.freeze({
@@ -51,6 +79,7 @@ export const TITAN_NATIVE_WORKFORCE_AGENT_MAP: Readonly<Record<TitanNativeWorkfo
       op("booking_requests.list", "GET", "/api/v1/booking-requests", "Inspect inbound service requests", false),
       op("booking_requests.create", "POST", "/api/v1/booking-requests", "Capture a new service request without creating a parallel lead store", true),
     ]),
+    cleaningProfileBinding: cleaningBinding("reception", "titan.cleaning.scope_assessor", "Capture cleaning scope and intake facts", ["clients.list", "booking_requests.list", "booking_requests.create"]),
     handoffTargets: keys("sales", "booking", "customer_care"),
   }),
   sales: Object.freeze({
@@ -76,6 +105,7 @@ export const TITAN_NATIVE_WORKFORCE_AGENT_MAP: Readonly<Record<TitanNativeWorkfo
       op("estimates.list", "GET", "/api/v1/estimates", "Inspect quote state before recommending a quote handoff", false),
       op("estimates.create", "POST", "/api/v1/estimates", "Create an estimate only through the canonical estimate API", true),
     ]),
+    cleaningProfileBinding: cleaningBinding("sales", "titan.cleaning.quote_specialist", "Prepare a scoped cleaning estimate from supplied company pricing", ["booking_requests.list", "booking_requests.update", "estimates.list", "estimates.create"]),
     handoffTargets: keys("reception", "booking", "customer_care"),
   }),
   booking: Object.freeze({
@@ -97,6 +127,7 @@ export const TITAN_NATIVE_WORKFORCE_AGENT_MAP: Readonly<Record<TitanNativeWorkfo
       op("booking_requests.convert", "POST", "/api/v1/booking-requests/:id/convert", "Convert through the existing booking conversion workflow", true),
       op("properties.list", "GET", "/api/v1/properties", "Resolve service location context", false),
     ]),
+    cleaningProfileBinding: cleaningBinding("booking", "titan.cleaning.keys_access", "Prepare cleaning bookings with property and access context", ["booking_requests.list", "booking_requests.get", "booking_requests.update", "booking_requests.convert", "properties.list"]),
     handoffTargets: keys("scheduling", "jobs", "customer_care"),
   }),
   scheduling: Object.freeze({
@@ -116,6 +147,7 @@ export const TITAN_NATIVE_WORKFORCE_AGENT_MAP: Readonly<Record<TitanNativeWorkfo
       op("work_orders.list", "GET", "/api/v1/work-orders", "Resolve assignment/work packet context", false),
       op("users.list", "GET", "/api/v1/users", "Load company-scoped workers for assignment recommendations", false),
     ]),
+    cleaningProfileBinding: cleaningBinding("scheduling", "titan.cleaning.crew_planner", "Recommend cleaning crew and one-off visit plans", ["projects.list", "project_visits.list", "project_visits.bulk", "visits.update", "work_orders.list", "users.list"]),
     handoffTargets: keys("jobs", "customer_care"),
   }),
   jobs: Object.freeze({
@@ -140,6 +172,7 @@ export const TITAN_NATIVE_WORKFORCE_AGENT_MAP: Readonly<Record<TitanNativeWorkfo
       op("visits.get", "GET", "/api/v1/visits/:id", "Load execution state", false),
       op("visits.transition", "POST", "/api/v1/visits/:id/transition", "Transition visit state through canonical guards", true),
     ]),
+    cleaningProfileBinding: cleaningBinding("jobs", "titan.cleaning.quality_inspector", "Review cleaning completion readiness and exceptions", ["projects.list", "projects.get", "projects.transition", "work_orders.list", "work_orders.complete", "work_orders.start_visit", "visits.get", "visits.transition"]),
     handoffTargets: keys("customer_care", "scheduling"),
   }),
   customer_care: Object.freeze({
@@ -161,6 +194,7 @@ export const TITAN_NATIVE_WORKFORCE_AGENT_MAP: Readonly<Record<TitanNativeWorkfo
       op("property_issues.create", "POST", "/api/v1/properties/:id/issues", "Record a service issue through the existing property issue lifecycle", true),
       op("property_issues.update", "PATCH", "/api/v1/properties/:id/issues/:issueId", "Resolve, monitor or refer an existing service issue through canonical guards", true),
     ]),
+    cleaningProfileBinding: cleaningBinding("customer_care", "titan.cleaning.service_recovery", "Prepare cleaning service recovery from customer and property issue history", ["clients.list", "clients.get", "projects.get", "invoices.get", "property_issues.list", "property_issues.create", "property_issues.update"]),
     handoffTargets: keys("jobs", "sales"),
   }),
 });
@@ -171,6 +205,55 @@ export function getTitanNativeWorkforceAgentMap(agentKey: string): TitanNativeWo
 
 export function listTitanNativeWorkforceAgentMaps(): readonly TitanNativeWorkforceAgentMap[] {
   return Object.values(TITAN_NATIVE_WORKFORCE_AGENT_MAP);
+}
+
+export function getTitanNativeCleaningProfileBinding(profileId: string): TitanNativeCleaningProfileBinding | null {
+  const normalized = String(profileId ?? "").trim();
+  if (!normalized) return null;
+  return listTitanNativeWorkforceAgentMaps().find((entry) => entry.cleaningProfileBinding.profileId === normalized)?.cleaningProfileBinding ?? null;
+}
+
+export function resolveTitanNativeCleaningProfileBinding(
+  agentKey: TitanNativeWorkforceAgentKey,
+  profileId: string | undefined,
+  operationId: string | null,
+): TitanNativeCleaningProfileBinding | null {
+  const normalized = String(profileId ?? "").trim();
+  if (!normalized) return null;
+  const binding = getTitanNativeCleaningProfileBinding(normalized);
+  if (!binding) throw new Error(`cleaning-profile-unavailable:${normalized}`);
+  if (binding.agentKey !== agentKey) throw new Error(`cleaning-profile-agent-mismatch:${normalized}`);
+  if (operationId && !binding.allowedOperationIds.includes(operationId)) {
+    throw new Error(`cleaning-profile-operation-unavailable:${normalized}:${operationId}`);
+  }
+  return binding;
+}
+
+export function projectTitanNativeCleaningProfile(profileId: string): Readonly<{
+  profile_id: string;
+  binding_status: "bound_suggest_only" | "unavailable";
+  agent_key: TitanNativeWorkforceAgentKey | null;
+  responsibility: string | null;
+  allowed_operation_ids: readonly string[];
+  autonomy: "suggest";
+  authority_granted: false;
+  execution_permitted: false;
+  team_eligibility: "unavailable";
+}> {
+  const normalized = String(profileId ?? "").trim();
+  if (!normalized) throw new Error("cleaning-profile-id-required");
+  const binding = getTitanNativeCleaningProfileBinding(normalized);
+  return Object.freeze({
+    profile_id: normalized,
+    binding_status: binding ? "bound_suggest_only" : "unavailable",
+    agent_key: binding?.agentKey ?? null,
+    responsibility: binding?.responsibility ?? null,
+    allowed_operation_ids: binding?.allowedOperationIds ?? Object.freeze([]),
+    autonomy: "suggest",
+    authority_granted: false,
+    execution_permitted: false,
+    team_eligibility: "unavailable",
+  });
 }
 
 export function assertTitanNativeWorkforceBoundary(companyId: string): string {

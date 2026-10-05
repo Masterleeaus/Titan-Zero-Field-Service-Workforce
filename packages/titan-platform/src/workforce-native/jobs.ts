@@ -2,6 +2,8 @@ import { createJobsAgentRuntime } from "../ported/titan-workforce/starter-agents
 import {
   assertTitanNativeWorkforceBoundary,
   getTitanNativeWorkforceAgentMap,
+  resolveTitanNativeCleaningProfileBinding,
+  type TitanNativeCleaningProfileBinding,
   type TitanNativeWorkforceOperation,
 } from "./contracts.js";
 
@@ -32,6 +34,7 @@ export type TitanJobsPlanInput = Readonly<{
   visitId?: string | null;
   payload?: Readonly<Record<string, unknown>>;
   traceId?: string | null;
+  cleaningProfileId?: string;
 }>;
 
 type JsonRecord = Readonly<Record<string, unknown>>;
@@ -104,7 +107,9 @@ export function buildTitanJobsPlan(input: TitanJobsPlanInput) {
     handoffs = runtime.buildCompletionHandoffs(readiness, { ...payload, company_id });
   } else { const exhaustive: never = input.action; throw new Error(`unsupported-jobs-action:${String(exhaustive)}`); }
 
-  return Object.freeze({ schema: "titan.zero.workforce-native.jobs-plan/v1", agentKey: "jobs" as const, company_id, actor_id, action: input.action, operation: op, entity_id, query, body, evaluation, exception, resolution, offline, handoffs,
+  const cleaning_profile_binding = resolveTitanNativeCleaningProfileBinding("jobs", input.cleaningProfileId, op?.id ?? null);
+
+  return Object.freeze({ schema: "titan.zero.workforce-native.jobs-plan/v1", agentKey: "jobs" as const, company_id, actor_id, action: input.action, operation: op, cleaning_profile_binding, entity_id, query, body, evaluation, exception, resolution, offline, handoffs,
     authority: Object.freeze({ identity_grants_authority:false, execution_permitted:false, native_route_authoritative:true, requires_authenticated_actor:true, transition_authority_assumed:false, completion_authority_assumed:false }),
     browser_extension_required:false });
 }

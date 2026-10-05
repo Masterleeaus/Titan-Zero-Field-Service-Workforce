@@ -9,7 +9,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const record = z.record(z.unknown());
-const actionSchema = z.discriminatedUnion("action", [
+const actionSchema = z.intersection(z.discriminatedUnion("action", [
   z.object({ action: z.literal("list_leads"), status: z.string().max(64).optional(), limit: z.number().int().min(1).max(200).optional(), dryRun: z.boolean().optional() }),
   z.object({ action: z.literal("qualify_lead"), qualification: record, dryRun: z.boolean().optional() }),
   z.object({ action: z.literal("next_best_action"), qualification: record, dryRun: z.boolean().optional() }),
@@ -19,7 +19,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("plan_follow_up"), payload: record, dryRun: z.boolean().optional() }),
   z.object({ action: z.literal("handle_objection"), payload: record, dryRun: z.boolean().optional() }),
   z.object({ action: z.literal("escalate"), requestId: z.string().min(1).max(128), payload: record, dryRun: z.boolean().optional() }),
-]);
+]), z.object({ cleaningProfileId: z.string().min(1).max(180).optional() }));
 
 export const GET = withRole(["owner", "admin"], async (_request, session) => {
   const plan = buildNativeSalesPlan(session, { action: "list_leads", dryRun: true });

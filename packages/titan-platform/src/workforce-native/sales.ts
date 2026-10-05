@@ -7,6 +7,8 @@ import { createSalesStructuredHandoff } from "../ported/titan-workforce/starter-
 import {
   assertTitanNativeWorkforceBoundary,
   getTitanNativeWorkforceAgentMap,
+  resolveTitanNativeCleaningProfileBinding,
+  type TitanNativeCleaningProfileBinding,
   type TitanNativeWorkforceOperation,
 } from "./contracts.js";
 
@@ -32,6 +34,7 @@ export type TitanSalesPlanInput = Readonly<{
   qualification?: Record<string, unknown>;
   handoff?: Record<string, unknown>;
   traceId?: string;
+  cleaningProfileId?: string;
 }>;
 
 export type TitanSalesExecutionPlan = Readonly<{
@@ -41,6 +44,7 @@ export type TitanSalesExecutionPlan = Readonly<{
   actor_id: string;
   action: TitanSalesAction;
   operation: TitanNativeWorkforceOperation | null;
+  cleaning_profile_binding: TitanNativeCleaningProfileBinding | null;
   entity_id: string | null;
   query: Readonly<Record<string, string>>;
   body: Readonly<Record<string, unknown>> | null;
@@ -182,6 +186,8 @@ export function buildTitanSalesPlan(input: TitanSalesPlanInput): TitanSalesExecu
     throw new Error(`unsupported-sales-action:${String(exhaustive)}`);
   }
 
+  const cleaning_profile_binding = resolveTitanNativeCleaningProfileBinding("sales", input.cleaningProfileId, operation?.id ?? null);
+
   return Object.freeze({
     schema: "titan.zero.workforce-native.sales-plan/v1",
     agentKey: "sales",
@@ -189,6 +195,7 @@ export function buildTitanSalesPlan(input: TitanSalesPlanInput): TitanSalesExecu
     actor_id,
     action: input.action,
     operation,
+    cleaning_profile_binding,
     entity_id,
     query,
     body,
