@@ -1,0 +1,61 @@
+DirectoryIndex index.html
+Options -MultiViews
+ErrorDocument 404 /404.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^sitemap\.xml$ - [G,L]
+  RewriteRule ^(?:field|platform|operations|owner-operations)/?$ / [R=301,L]
+  RewriteRule ^(?:field-workforce|operations-workforce|ai-workforce)/?$ /workforce [R=301,L]
+  RewriteRule ^handyman/?$ /trades/handyman-property-maintenance [R=301,L]
+  RewriteRule ^build/?$ https://build.titanzero.io/ [R=301,L]
+  RewriteRule ^(?:desk|front-office)/?$ https://desk.titanzero.io/ [R=301,L]
+  RewriteRule ^pay/?$ https://pay.titanzero.io/ [R=301,L]
+  RewriteRule ^zero/?$ https://titanzero.io/ [R=301,L]
+  RewriteRule ^core/?$ https://core.titanzero.io/ [R=301,L]
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^(.+)/$ /$1 [R=301,L]
+  RewriteRule ^features/?$ _pages/features.html [L]
+  RewriteRule ^workforce/?$ _pages/workforce.html [L]
+  RewriteRule ^pricing/?$ _pages/pricing.html [L]
+  RewriteRule ^titan\-go/?$ _pages/titan-go.html [L]
+  RewriteRule ^standards/?$ _pages/standards.html [L]
+  RewriteRule ^trades/?$ _pages/trades.html [L]
+  RewriteRule ^trades/handyman\-property\-maintenance/?$ _pages/trades--handyman-property-maintenance.html [L]
+  RewriteRule ^trades/carpentry\-joinery/?$ _pages/trades--carpentry-joinery.html [L]
+  RewriteRule ^trades/painting\-decorating/?$ _pages/trades--painting-decorating.html [L]
+  RewriteRule ^trades/plastering\-repairs/?$ _pages/trades--plastering-repairs.html [L]
+  RewriteRule ^trades/tiling\-surface\-work/?$ _pages/trades--tiling-surface-work.html [L]
+  RewriteRule ^trades/pressure\-exterior\-cleaning/?$ _pages/trades--pressure-exterior-cleaning.html [L]
+  RewriteRule ^trades/rental\-strata\-maintenance/?$ _pages/trades--rental-strata-maintenance.html [L]
+  RewriteRule ^trades/equipment\-appliance\-repair/?$ _pages/trades--equipment-appliance-repair.html [L]
+  RewriteRule ^suite/?$ _pages/suite.html [L]
+  RewriteRule ^integrations/?$ _pages/integrations.html [L]
+  RewriteRule ^security/?$ _pages/security.html [L]
+  RewriteRule ^onboarding/?$ _pages/onboarding.html [L]
+  RewriteRule ^faq/?$ _pages/faq.html [L]
+  RewriteRule ^sovereign/?$ _pages/sovereign.html [L]
+  RewriteRule ^contact/?$ _pages/contact.html [L]
+  RewriteRule ^why\-field/?$ _pages/why-field.html [L]
+  RewriteRule ^about/?$ _pages/about.html [L]
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  RewriteRule ^ - [R=404,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  Header always set X-Robots-Tag "noindex, nofollow"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "geolocation=(self), microphone=(), camera=()"
+  <FilesMatch "^index\.html$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  <FilesMatch "\.(js|css)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+  <FilesMatch "\.(png|jpg|jpeg|webp|svg)$">
+    Header set Cache-Control "public, max-age=604800"
+  </FilesMatch>
+</IfModule>
