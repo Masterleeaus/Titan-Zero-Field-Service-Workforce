@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { redirect, notFound } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { withDbSession, queryForSession, queryOneForSession } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/db/portable";
+import { loadCompanyMemberDirectory } from "@/lib/workforce/member-directory";
 import {
   canTransitionVisit,
   canAssignVisit,
@@ -197,11 +199,9 @@ export default async function VisitDetailPage({
   const canDeleteMedia = session.role !== "tech";
 
   const assignableUsers = canAssign
-    ? await queryForSession<{ id: string; full_name: string; role: string; [key: string]: unknown }>(
-        session,
-        `SELECT id, full_name, role FROM users WHERE account_id = $1 ORDER BY full_name ASC`,
-        [session.accountId]
-      )
+    ? await withTenantTransaction(session, async (client, accountId) => {
+        return (await loadCompanyMemberDirectory(client, accountId)).map(({ id, full_name, role }) => ({ id, full_name, role }));
+      })
     : [];
 
   const isRepairFlow = visit.job_type !== null && visit.job_type !== "maintenance";

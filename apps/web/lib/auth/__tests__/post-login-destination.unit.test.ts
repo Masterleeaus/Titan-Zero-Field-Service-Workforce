@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  expiredSessionLoginRedirectForPath,
+  loginRedirectForPath,
   readWorkspaceModeCookie,
   resolvePostLoginHref,
 } from "../post-login-destination";
@@ -100,5 +102,28 @@ describe("Business Ops post-login deep links", () => {
         next: "/portal/client",
       }),
     ).toBe("/app");
+  });
+});
+
+describe("bounded session reauthentication navigation", () => {
+  it("preserves only an allowlisted path after the verified session expires", () => {
+    const href = expiredSessionLoginRedirectForPath("/app/jobs/job-123");
+    const parsed = new URL(href, "https://titan-zero.invalid");
+    expect(parsed.pathname).toBe("/login");
+    expect(parsed.searchParams.get("reason")).toBe("session-expired");
+    expect(parsed.searchParams.get("next")).toBe("/app/jobs/job-123");
+  });
+
+  it("does not carry unapproved paths or query strings into login redirects", () => {
+    expect(expiredSessionLoginRedirectForPath("/app/no-such-route?secret=1")).toBe(
+      "/login?reason=session-expired",
+    );
+  });
+
+  it("labels an unauthenticated protected-route redirect without claiming expiry", () => {
+    const href = loginRedirectForPath("/app/capture");
+    const parsed = new URL(href, "https://titan-zero.invalid");
+    expect(parsed.searchParams.get("reason")).toBe("signin-required");
+    expect(parsed.searchParams.get("next")).toBe("/app/capture");
   });
 });

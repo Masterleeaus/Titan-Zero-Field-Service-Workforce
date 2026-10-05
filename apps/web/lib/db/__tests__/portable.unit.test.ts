@@ -3,7 +3,8 @@ import type { SessionPayload } from "@/lib/auth/session";
 import { countUnreadAttentionEvents } from "@/lib/attention/counts";
 import { portableQuery, withPortableTransaction, withTenantTransaction } from "../portable";
 
-const state = vi.hoisted(() => ({ dialect: "mysql", result: [{ id: "row-1" }], fail: false,
+const state = vi.hoisted(() => ({ dialect: "mysql", result: [{ id: "row-1" }],
+  membershipRows: [{ role: "owner", status: "active" }], fail: false,
   sql: [] as Array<[string, unknown[] | undefined]>, events: [] as string[] }));
 vi.mock("../mysql", () => {
   const connection = {
@@ -33,7 +34,8 @@ vi.mock("@/lib/db", () => {
     async query(sql: string, params?: unknown[]) {
       if (this !== client) throw new Error("lost postgres client receiver");
       state.sql.push([sql, params]);
-      return { rows: state.result, rowCount: state.result.length };
+      const rows = sql.includes("FROM business_memberships") ? state.membershipRows : state.result;
+      return { rows, rowCount: rows.length };
     },
     release() { state.events.push("release"); },
   };
@@ -48,7 +50,8 @@ vi.mock("@/lib/db", () => {
   return { getDatabaseDialect: () => state.dialect, getPool: () => pool };
 });
 vi.mock("../sqlite", () => ({ getSqliteClient: vi.fn(), withSqliteTransaction: vi.fn() }));
-beforeEach(() => { state.dialect = "mysql"; state.result = [{ id: "row-1" }]; state.fail = false; state.sql = []; state.events = []; });
+beforeEach(() => { state.dialect = "mysql"; state.result = [{ id: "row-1" }];
+  state.membershipRows = [{ role: "owner", status: "active" }]; state.fail = false; state.sql = []; state.events = []; });
 describe("existing portable driver boundaries", () => {
   it("keeps MySQL pool receiver and repeated/reordered bindings", async () => {
     expect(await portableQuery("SELECT $2, $1, $2", ["row-1", "company-a"])).toEqual(state.result);
@@ -89,7 +92,26 @@ describe("existing portable driver boundaries", () => {
     expect(state.sql[0][0]).toBe("BEGIN");
     expect(state.sql[1][0]).toContain("app.current_account_id");
     expect(state.sql[1][1]).toEqual(["user", "company-a", "owner"]);
-    expect(state.sql[2][0]).toBe("COMMIT");
+    expect(state.sql[2][0]).toContain("FROM business_memberships");
+    expect(state.sql[2][0]).toContain("WHERE account_id = $1 AND user_id = $2");
+    expect(state.sql[2][1]).toEqual(["company-a", "user"]);
+    expect(state.sql[3][0]).toBe("COMMIT");
     expect(state.events).toEqual(["connect", "release"]);
+  });
+
+  it.each([
+    ["demoted", [{ role: "tech", status: "active" }]],
+    ["revoked", [{ role: "owner", status: "revoked" }]],
+    ["missing", []],
+  ])("rejects a %s membership before running tenant route logic", async (_case, membershipRows) => {
+    state.dialect = "postgres";
+    state.membershipRows = membershipRows;
+    let invoked = false;
+    await expect(withTenantTransaction(
+      { userId: "user", accountId: "company-a", role: "owner" } as SessionPayload,
+      async () => { invoked = true; },
+    )).rejects.toMatchObject({ code: "TENANT_MEMBERSHIP_CONTEXT_STALE" });
+    expect(invoked).toBe(false);
+    expect(state.sql[state.sql.length - 1][0]).toBe("ROLLBACK");
   });
 });

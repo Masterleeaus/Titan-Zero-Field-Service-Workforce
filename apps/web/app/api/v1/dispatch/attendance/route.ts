@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAuth, type AuthSession } from "@/lib/auth/middleware";
-import { portableQuery } from "@/lib/db/portable";
+import { withTenantTransaction } from "@/lib/db/portable";
 import { summarizeAttendance, type AttendanceClockRow } from "@/lib/workforce/attendance";
+import { loadCompanyMemberDirectory } from "@/lib/workforce/member-directory";
 
 export const dynamic = "force-dynamic";
 
@@ -27,28 +28,26 @@ export const GET = withAuth(async (request: NextRequest, session: AuthSession) =
   const end = isoDate(request.nextUrl.searchParams.get("end"), sunday.toISOString().slice(0, 10));
   const overtimeThreshold = Math.max(0, Number(request.nextUrl.searchParams.get("weekly_overtime_minutes") ?? 2400) || 2400);
 
-  const [members, clocks] = await Promise.all([
-    portableQuery<{ user_id: string; full_name: string; email: string; role: string }>(
-      `SELECT bm.user_id, u.full_name, u.email, bm.role
-         FROM business_memberships bm
-         JOIN users u ON u.id = bm.user_id AND u.account_id = bm.account_id
-        WHERE bm.account_id = $1 AND bm.status = 'active'
-        ORDER BY u.full_name, u.email`,
-      [session.accountId],
-    ),
-    portableQuery<AttendanceClockRow & Record<string, unknown>>(
-      `SELECT user_id, clock_in_at, clock_out_at, status
-         FROM time_clock_sessions
-        WHERE account_id = $1 AND voided_at IS NULL
-          AND clock_in_at >= $2 AND clock_in_at < $3
-        ORDER BY user_id, clock_in_at`,
-      [session.accountId, `${start}T00:00:00.000Z`, `${end}T23:59:59.999Z`],
-    ),
-  ]);
+  const data = await withTenantTransaction(session, async (client, accountId) => {
+    const [directory, clocks] = await Promise.all([
+      loadCompanyMemberDirectory(client, accountId),
+      client.query<AttendanceClockRow & Record<string, unknown>>(
+        `SELECT user_id, clock_in_at, clock_out_at, status
+           FROM time_clock_sessions
+          WHERE account_id = $1 AND voided_at IS NULL
+            AND clock_in_at >= $2 AND clock_in_at < $3
+          ORDER BY user_id, clock_in_at`,
+        [accountId, `${start}T00:00:00.000Z`, `${end}T23:59:59.999Z`],
+      ),
+    ]);
 
-  const data = members.map((member) => ({
-    ...member,
-    ...summarizeAttendance(member.user_id, clocks, overtimeThreshold, now),
-  }));
+    return directory.map(({ id, full_name, email, role }) => ({
+      user_id: id,
+      full_name,
+      email,
+      role,
+      ...summarizeAttendance(id, clocks.rows, overtimeThreshold, now),
+    }));
+  });
   return NextResponse.json({ data: { start, end, weekly_overtime_minutes: overtimeThreshold, members: data } });
 });

@@ -4,7 +4,7 @@
  * Workforce capability graph. Optional Frappe HR skill records are provider data,
  * not Titan execution authority and not a default replacement.
  */
-import { portableQuery } from "@/lib/db/portable";
+import type { DbClient } from "@/lib/db-contract";
 
 export type TechnicianSkill = {
   skillId: string;
@@ -21,8 +21,8 @@ type SkillRow = {
   proficiency: number | null;
 };
 
-export async function loadTechnicianSkills(accountId: string) {
-  const rows = await portableQuery<SkillRow>(
+export async function loadTechnicianSkills(client: DbClient, accountId: string) {
+  const { rows } = await client.query<SkillRow>(
     `SELECT ts.user_id, ts.skill_id, ws.name, ws.category, ts.proficiency
        FROM technician_skills ts
        JOIN workforce_skills ws ON ws.id = ts.skill_id AND ws.account_id = ts.account_id

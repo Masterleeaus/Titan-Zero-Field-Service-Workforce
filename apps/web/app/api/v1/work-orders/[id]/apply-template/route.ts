@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withAuth, type AuthSession } from "@/lib/auth/middleware";
-import { withPortableTransaction } from "@/lib/db/portable";
+import { withTenantTransaction } from "@/lib/db/portable";
 import { applyFieldJobTemplateToWorkOrder } from "@/lib/work-orders/field-job-templates";
 import { loadWorkOrderTasks } from "@/lib/work-orders/task-time";
 import { logger } from "@/lib/logger";
@@ -18,11 +18,11 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Invalid template request" } }, { status: 422 });
   try {
-    const result = await withPortableTransaction(async (client) => {
+    const result = await withTenantTransaction(session, async (client, accountId) => {
       const inserted = await applyFieldJobTemplateToWorkOrder(client, {
-        accountId: session.accountId, workOrderId, templateId: parsed.data.template_id, replace: parsed.data.replace ?? false,
+        accountId, workOrderId, templateId: parsed.data.template_id, replace: parsed.data.replace ?? false,
       });
-      const tasks = await loadWorkOrderTasks(client, workOrderId, session.accountId);
+      const tasks = await loadWorkOrderTasks(client, workOrderId, accountId);
       return { inserted, tasks };
     });
     return NextResponse.json({ data: result });

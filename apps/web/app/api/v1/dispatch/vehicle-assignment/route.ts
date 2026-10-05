@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withRole } from "@/lib/auth/middleware";
-import { withPortableTransaction } from "@/lib/db/portable";
+import { withTenantTransaction } from "@/lib/db/portable";
 import { logger } from "@/lib/logger";
 import { assignTechnicianVehicle, loadCurrentVehicleAssignments } from "@/lib/workforce/vehicle-assignment";
 
@@ -10,7 +10,7 @@ const schema = z.object({ user_id: z.string().uuid(), vehicle_id: z.string().uui
 
 export const GET = withRole(["owner", "admin"], async (_req: NextRequest, session) => {
   try {
-    const data = await withPortableTransaction((client) => loadCurrentVehicleAssignments(client, session.accountId));
+    const data = await withTenantTransaction(session, (client, accountId) => loadCurrentVehicleAssignments(client, accountId));
     return NextResponse.json({ data });
   } catch (error) {
     logger.error("GET /api/v1/dispatch/vehicle-assignment", error as Error, { traceId: session.traceId });
@@ -22,8 +22,8 @@ export const POST = withRole(["owner", "admin"], async (req: NextRequest, sessio
   const parsed = schema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: { message: "Invalid input", details: parsed.error.issues } }, { status: 400 });
   try {
-    const data = await withPortableTransaction((client) => assignTechnicianVehicle(client, {
-      accountId: session.accountId, userId: parsed.data.user_id, vehicleId: parsed.data.vehicle_id,
+    const data = await withTenantTransaction(session, (client, accountId) => assignTechnicianVehicle(client, {
+      accountId, userId: parsed.data.user_id, vehicleId: parsed.data.vehicle_id,
       assignedBy: session.userId, note: parsed.data.note,
     }));
     return NextResponse.json({ data });

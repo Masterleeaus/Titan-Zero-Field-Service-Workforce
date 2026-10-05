@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withAuth, type AuthSession } from "@/lib/auth/middleware";
-import { portableQuery, withPortableTransaction } from "@/lib/db/portable";
+import { withTenantTransaction } from "@/lib/db/portable";
 import { createFieldJobTemplate, loadFieldJobTemplates } from "@/lib/work-orders/field-job-templates";
 import { logger } from "@/lib/logger";
 
@@ -18,7 +18,7 @@ function manager(session: AuthSession) { return session.role === "owner" || sess
 
 export const GET = withAuth(async (_request: NextRequest, session: AuthSession) => {
   try {
-    const data = await withPortableTransaction((client) => loadFieldJobTemplates(client, session.accountId));
+    const data = await withTenantTransaction(session, (client, accountId) => loadFieldJobTemplates(client, accountId));
     return NextResponse.json({ data });
   } catch (error) {
     logger.error("GET field job templates", error, { traceId: session.traceId });
@@ -31,12 +31,17 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Invalid template", details: parsed.error.flatten().fieldErrors } }, { status: 422 });
   try {
-    const duplicate = await portableQuery<{ id: string }>(
-      `SELECT id FROM field_job_templates WHERE account_id = $1 AND name = $2 AND active = true LIMIT 1`,
-      [session.accountId, parsed.data.name.trim()],
-    );
-    if (duplicate[0]) return NextResponse.json({ error: { code: "CONFLICT", message: "A field job template with that name already exists" } }, { status: 409 });
-    const id = await withPortableTransaction((client) => createFieldJobTemplate(client, { accountId: session.accountId, ...parsed.data }));
+    const result = await withTenantTransaction(session, async (client, accountId) => {
+      const duplicate = await client.query<{ id: string }>(
+        `SELECT id FROM field_job_templates WHERE account_id = $1 AND name = $2 AND active = true LIMIT 1`,
+        [accountId, parsed.data.name.trim()],
+      );
+      if (duplicate.rows[0]) return { conflict: true as const };
+      const id = await createFieldJobTemplate(client, { accountId, ...parsed.data });
+      return { conflict: false as const, id };
+    });
+    if (result.conflict) return NextResponse.json({ error: { code: "CONFLICT", message: "A field job template with that name already exists" } }, { status: 409 });
+    const id = result.id;
     return NextResponse.json({ data: { id } }, { status: 201 });
   } catch (error) {
     logger.error("POST field job templates", error, { traceId: session.traceId });

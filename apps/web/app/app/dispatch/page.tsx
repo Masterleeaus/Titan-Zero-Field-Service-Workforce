@@ -4,6 +4,7 @@ import { PageContainer, PageHeader, HubSubnav, SurfaceState } from "@/components
 import { WORK_HUB_LINKS } from "@/lib/navigation/hubs";
 import { loadDispatchBoard } from "@/lib/dispatch/capacity";
 import { DispatchBoard } from "./DispatchBoard";
+import { withTenantTransaction } from "@/lib/db/portable";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,9 @@ export default async function DispatchPage() {
   const rangeStart = mondayStart();
   const rangeEnd = new Date(rangeStart);
   rangeEnd.setDate(rangeEnd.getDate() + 7);
-  const board = await loadDispatchBoard(session.accountId, rangeStart, rangeEnd);
+  const board = await withTenantTransaction(session, (client, accountId) =>
+    loadDispatchBoard(client, accountId, rangeStart, rangeEnd),
+  );
 
   return (
     <PageContainer>

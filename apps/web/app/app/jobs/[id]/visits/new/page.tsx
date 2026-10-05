@@ -2,6 +2,8 @@ import { redirect, notFound } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { canCreateVisit, canAssignVisit } from "@/lib/auth/permissions";
 import { query, queryOne } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/db/portable";
+import { loadCompanyMemberDirectory } from "@/lib/workforce/member-directory";
 import { VisitScheduleForm } from "./VisitScheduleForm";
 import { Card, PageContainer, PageHeader } from "@/components/ui";
 
@@ -64,10 +66,9 @@ export default async function NewVisitPage({
   const canAssign = canAssignVisit(session.role);
 
   const users = canAssign
-    ? await query<User>(
-        `SELECT id, full_name, role FROM users WHERE account_id = $1 ORDER BY full_name ASC`,
-        [session.accountId]
-      )
+    ? await withTenantTransaction(session, async (client, accountId) => {
+        return (await loadCompanyMemberDirectory(client, accountId)).map(({ id, full_name, role }) => ({ id, full_name, role }));
+      })
     : [];
 
   // Bookable WOs only (draft promoted to ready on book). Completed/cancelled excluded.

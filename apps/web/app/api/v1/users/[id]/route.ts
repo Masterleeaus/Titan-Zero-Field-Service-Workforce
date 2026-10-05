@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withAuth } from "@/lib/auth/middleware";
 import type { AuthSession } from "@/lib/auth/middleware";
-import { getPool, queryOne } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/db/portable";
+import { getDatabaseDialect } from "@/lib/db/dialect";
 import { appendAuditLog } from "@/lib/db/audit";
+import { lockOwnerMembershipChanges } from "@/lib/db/owner-membership-lock";
+import { loadCompanyMemberDirectory } from "@/lib/workforce/member-directory";
 import { logger } from "@/lib/logger";
 import { getPathId } from "@/lib/route-utils";
+import { getWebSessionRuntime, WebMembershipReconciliationError } from "@/lib/auth/web-session-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +22,14 @@ const patchUserBody = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 
+async function membershipRuntime() {
+  try {
+    return await getWebSessionRuntime();
+  } catch {
+    throw new WebMembershipReconciliationError();
+  }
+}
+
 // Any authenticated user can view/edit — permissions enforced inside handler.
 export const GET = withAuth(async (request: NextRequest, session: AuthSession) => {
   const id = getPathId(request.nextUrl.pathname);
@@ -28,9 +40,8 @@ export const GET = withAuth(async (request: NextRequest, session: AuthSession) =
       { status: 403 }
     );
   }
-  const row = await queryOne(
-    `SELECT id, full_name, email, phone, role, created_at FROM users WHERE id = $1 AND account_id = $2`,
-    [id, session.accountId]
+  const row = await withTenantTransaction(session, async (client, accountId) =>
+    (await loadCompanyMemberDirectory(client, accountId)).find((member) => member.id === id) ?? null,
   );
   if (!row) {
     return NextResponse.json(
@@ -38,7 +49,14 @@ export const GET = withAuth(async (request: NextRequest, session: AuthSession) =
       { status: 404 }
     );
   }
-  return NextResponse.json({ data: row });
+  return NextResponse.json({ data: {
+    id: row.id,
+    full_name: row.full_name,
+    email: row.email,
+    phone: row.phone,
+    role: row.role,
+    created_at: row.created_at,
+  } });
 });
 
 export const PATCH = withAuth(async (request: NextRequest, session: AuthSession) => {
@@ -63,31 +81,13 @@ export const PATCH = withAuth(async (request: NextRequest, session: AuthSession)
 
   const { full_name, email, phone, role } = parsed.data;
 
-  // Role changes: owner only, and can't orphan the last owner
+  // Role changes: owner only, and can't orphan the last owner.
   if (role !== undefined) {
     if (session.role !== "owner") {
       return NextResponse.json(
         { error: { code: "FORBIDDEN", message: "Only owners can change roles", traceId: session.traceId } },
         { status: 403 }
       );
-    }
-    if (role !== "owner" && isSelf) {
-      // Check if this would remove the last owner
-      const client = await getPool().connect();
-      try {
-        const { rows } = await client.query(
-          `SELECT COUNT(*)::int AS cnt FROM users WHERE account_id = $1 AND role = 'owner'`,
-          [session.accountId]
-        );
-        if ((rows[0]?.cnt ?? 0) <= 1) {
-          return NextResponse.json(
-            { error: { code: "FORBIDDEN", message: "Cannot remove the last owner", traceId: session.traceId } },
-            { status: 422 }
-          );
-        }
-      } finally {
-        client.release();
-      }
     }
   }
 
@@ -101,72 +101,214 @@ export const PATCH = withAuth(async (request: NextRequest, session: AuthSession)
     }
   }
 
-  const pool = getPool();
-  const client = await pool.connect();
+  let roleToFinishAfterCommit: string | null = null;
   try {
-    await client.query("BEGIN");
-    await client.query(
-      `SELECT set_config('app.current_user_id', $1, true),
-              set_config('app.current_account_id', $2, true),
-              set_config('app.current_role', $3, true)`,
-      [session.userId, session.accountId, session.role]
-    );
+    const response = await withTenantTransaction(session, async (client, accountId) => {
+      if (role !== undefined) {
+        await lockOwnerMembershipChanges(client, accountId);
+        const actorMembership = await client.query<{ role: string }>(
+          `SELECT role FROM business_memberships
+            WHERE account_id = $1 AND user_id = $2 AND status = 'active'`,
+          [accountId, session.userId],
+        );
+        if (actorMembership.rows[0]?.role !== "owner") {
+          return NextResponse.json(
+            { error: { code: "FORBIDDEN", message: "Only current company owners can change roles", traceId: session.traceId } },
+            { status: 403 },
+          );
+        }
+      }
 
-    const before = await client.query(
-      `SELECT id, full_name, email, phone, role FROM users WHERE id = $1 AND account_id = $2`,
-      [id, session.accountId]
-    );
-    if (!before.rowCount) {
-      await client.query("ROLLBACK");
-      return NextResponse.json({ error: { code: "NOT_FOUND", message: "User not found", traceId: session.traceId } }, { status: 404 });
-    }
+      const profileFieldsRequested = full_name !== undefined || email !== undefined || phone !== undefined;
+      const before = (await loadCompanyMemberDirectory(client, accountId)).find((member) => member.id === id);
+      if (!before) {
+        // Owners may change the dormant membership role without reactivating
+        // a revoked or suspended member. The selected company status remains
+        // untouched, so this cannot restore login/session or dispatch access.
+        if (role !== undefined && !profileFieldsRequested) {
+          const dormant = await client.query<{ id: string; role: string; status: string }>(
+            `SELECT id, role, status FROM business_memberships
+              WHERE account_id = $1 AND user_id = $2 AND status IN ('revoked', 'suspended')`,
+            [accountId, id],
+          );
+          if (dormant.rows[0]) {
+            const dormantStatus = dormant.rows[0].status as "revoked" | "suspended";
+            const runtime = await membershipRuntime();
+            const needsRoleFinish = await runtime.restrictMembershipForLegacyChangeRequest(
+              request, id, dormant.rows[0].role, dormantStatus, role, dormantStatus,
+            );
+            const updated = await client.query<{ id: string; role: string; status: string }>(
+              `UPDATE business_memberships SET role = $1, updated_at = now()
+                WHERE account_id = $2 AND user_id = $3 AND status = $4
+                RETURNING id, role, status`,
+              [role, accountId, id, dormant.rows[0].status],
+            );
+            if (updated.rows[0]) {
+              if (needsRoleFinish) roleToFinishAfterCommit = role;
+              await appendAuditLog(client, {
+                account_id: accountId,
+                entity_type: "business_membership",
+                entity_id: updated.rows[0].id,
+                action: "update",
+                actor_id: session.userId,
+                trace_id: session.traceId,
+                old_value: dormant.rows[0] as unknown as Record<string, unknown>,
+                new_value: updated.rows[0] as unknown as Record<string, unknown>,
+              });
+              return NextResponse.json({ data: { id, role: updated.rows[0].role, status: updated.rows[0].status } });
+            }
+          } else {
+            const dialect = client.dialect ?? getDatabaseDialect();
+            let updated = false;
+            if (dialect === "postgres") {
+              const result = await client.query<{ updated: boolean }>(
+                `SELECT public.app_update_legacy_user_role($1::uuid, $2) AS updated`,
+                [id, role],
+              );
+              updated = result.rows[0]?.updated === true;
+            } else {
+              const legacyUser = await client.query<{ id: string }>(
+                `SELECT id FROM users WHERE id = $1 AND account_id = $2`, [id, accountId],
+              );
+              const existingMembership = await client.query(
+                `SELECT id FROM business_memberships WHERE account_id = $1 AND user_id = $2`,
+                [accountId, id],
+              );
+              if (legacyUser.rows[0] && !existingMembership.rows[0]) {
+                const result = await client.query(
+                  `UPDATE users SET role = $1, updated_at = now() WHERE id = $2 AND account_id = $3`,
+                  [role, id, accountId],
+                );
+                updated = (result.rowCount ?? 0) === 1;
+              }
+            }
+            if (updated) return NextResponse.json({ data: { id, role } });
+          }
+        }
+        return NextResponse.json({ error: { code: "NOT_FOUND", message: "User not found", traceId: session.traceId } }, { status: 404 });
+      }
 
-    const setClauses: string[] = ["updated_at = now()"];
-    const params: unknown[] = [];
-    let idx = 1;
+      const previousRole = before.role;
+      if (role !== undefined && previousRole === "owner" && role !== "owner") {
+        const { rows: ownerRows } = await client.query<{ cnt: number }>(
+          `SELECT COUNT(*)::int AS cnt FROM business_memberships
+            WHERE account_id = $1 AND status = 'active' AND role = 'owner'`,
+          [accountId],
+        );
+        if ((ownerRows[0]?.cnt ?? 0) <= 1) {
+          return NextResponse.json(
+            { error: { code: "FORBIDDEN", message: "Cannot remove the last owner", traceId: session.traceId } },
+            { status: 422 },
+          );
+        }
+      }
 
-    if (full_name !== undefined) { setClauses.push(`full_name = $${idx++}`); params.push(full_name); }
-    if (email !== undefined) { setClauses.push(`email = $${idx++}`); params.push(email.toLowerCase().trim()); }
-    if (phone !== undefined) { setClauses.push(`phone = $${idx++}`); params.push(phone || null); }
-    if (role !== undefined) { setClauses.push(`role = $${idx++}`); params.push(role); }
-    params.push(id);
-
-    const { rows } = await client.query(
-      `UPDATE users SET ${setClauses.join(", ")} WHERE id = $${idx} AND account_id = $${idx + 1} RETURNING id, full_name, email, phone, role`,
-      [...params, session.accountId]
-    );
-
-    if (role !== undefined) {
-      // Membership is the session role source. Synchronize only this company;
-      // never recreate a missing membership or reactivate an inactive one.
-      await client.query(
-        `UPDATE business_memberships SET role = $1 WHERE user_id = $2 AND account_id = $3`,
-        [role, id, session.accountId]
+      const primaryProfile = await client.query<{ id: string }>(
+        `SELECT id FROM users WHERE id = $1 AND account_id = $2`,
+        [id, accountId],
       );
-    }
+      if (profileFieldsRequested && !primaryProfile.rows[0]) {
+        return NextResponse.json({ error: {
+          code: "PRIMARY_COMPANY_PROFILE_REQUIRED",
+          message: "Profile fields can only be changed through the user's primary company",
+          traceId: session.traceId,
+        } }, { status: 403 });
+      }
 
-    await appendAuditLog(client, {
-      account_id: session.accountId,
-      entity_type: "user",
-      entity_id: id,
-      action: "update",
-      actor_id: session.userId,
-      trace_id: session.traceId,
-      old_value: before.rows[0] as Record<string, unknown>,
-      new_value: rows[0] as Record<string, unknown>,
+      if (role !== undefined) {
+        const runtime = await membershipRuntime();
+        const needsRoleFinish = await runtime.restrictMembershipForLegacyChangeRequest(
+          request, id, previousRole, before.status, role, "active",
+        );
+        if (needsRoleFinish) roleToFinishAfterCommit = role;
+      }
+
+      if (profileFieldsRequested || (role !== undefined && primaryProfile.rows[0])) {
+        const dialect = client.dialect ?? getDatabaseDialect();
+        const profile = {
+          full_name: full_name ?? before.full_name,
+          email: email === undefined ? before.email : email.toLowerCase().trim(),
+          phone: phone === undefined ? before.phone : phone || null,
+          role: role ?? (await client.query<{ role: string }>(
+            `SELECT role FROM users WHERE id = $1 AND account_id = $2`, [id, accountId],
+          )).rows[0]?.role ?? before.role,
+        };
+        if (dialect === "postgres") {
+          const updated = await client.query<{ updated: boolean }>(
+            `SELECT public.app_update_company_member_profile($1::uuid, $2, $3, $4, $5) AS updated`,
+            [id, profile.full_name, profile.email, profile.phone, profile.role],
+          );
+          if (updated.rows[0]?.updated !== true) {
+            return NextResponse.json({ error: {
+              code: "FORBIDDEN",
+              message: "Company member profile update is not authorized",
+              traceId: session.traceId,
+            } }, { status: 403 });
+          }
+        } else {
+          const setClauses: string[] = ["updated_at = now()"];
+          const params: unknown[] = [];
+          let idx = 1;
+          if (full_name !== undefined) { setClauses.push(`full_name = $${idx++}`); params.push(full_name); }
+          if (email !== undefined) { setClauses.push(`email = $${idx++}`); params.push(email.toLowerCase().trim()); }
+          if (phone !== undefined) { setClauses.push(`phone = $${idx++}`); params.push(phone || null); }
+          if (role !== undefined) { setClauses.push(`role = $${idx++}`); params.push(role); }
+          params.push(id, accountId);
+          await client.query(
+            `UPDATE users SET ${setClauses.join(", ")} WHERE id = $${idx} AND account_id = $${idx + 1}`,
+            params,
+          );
+        }
+      }
+
+      if (role !== undefined) {
+        // Roles belong to the selected company membership, not the global principal.
+        const membershipUpdate = await client.query(
+          `UPDATE business_memberships SET role = $1, updated_at = now()
+            WHERE user_id = $2 AND account_id = $3 AND status = 'active'`,
+          [role, id, accountId],
+        );
+        if (membershipUpdate.rowCount !== 1) throw new Error("Active membership disappeared during role update");
+      }
+
+      const updated = {
+        id: before.id,
+        full_name: full_name ?? before.full_name,
+        email: email === undefined ? before.email : email.toLowerCase().trim(),
+        phone: phone === undefined ? before.phone : phone || null,
+        role: role ?? before.role,
+      };
+
+      await appendAuditLog(client, {
+        account_id: accountId,
+        entity_type: "user",
+        entity_id: id,
+        action: "update",
+        actor_id: session.userId,
+        trace_id: session.traceId,
+        old_value: before as unknown as Record<string, unknown>,
+        new_value: updated,
+      });
+      return NextResponse.json({ data: updated });
     });
-
-    await client.query("COMMIT");
-    return NextResponse.json({ data: rows[0] });
+    if (roleToFinishAfterCommit !== null) {
+      const runtime = await membershipRuntime();
+      await runtime.finishMembershipRoleChangeRequest(request, id, roleToFinishAfterCommit);
+    }
+    return response;
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (error instanceof WebMembershipReconciliationError) {
+      return NextResponse.json({ error: {
+        code: "AUTHORITY_RECONCILIATION_UNAVAILABLE",
+        message: "Membership authority update is temporarily unavailable; retry the requested change",
+        traceId: session.traceId,
+      } }, { status: 503, headers: { "Retry-After": "1" } });
+    }
     logger.error("PATCH /api/v1/users/[id] error", error, { traceId: session.traceId });
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Failed to update user", traceId: session.traceId } },
       { status: 500 }
     );
-  } finally {
-    client.release();
   }
 });
 
@@ -186,71 +328,107 @@ export const DELETE = withAuth(async (request: NextRequest, session: AuthSession
     );
   }
 
-  const pool = getPool();
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    await client.query(
-      `SELECT set_config('app.current_user_id', $1, true),
-              set_config('app.current_account_id', $2, true),
-              set_config('app.current_role', $3, true)`,
-      [session.userId, session.accountId, session.role]
-    );
-
-    const before = await client.query(
-      `SELECT id, full_name, email, role FROM users WHERE id = $1 AND account_id = $2`,
-      [id, session.accountId]
-    );
-    if (!before.rowCount) {
-      await client.query("ROLLBACK");
-      return NextResponse.json({ error: { code: "NOT_FOUND", message: "User not found", traceId: session.traceId } }, { status: 404 });
-    }
-
-    const target = before.rows[0] as { role: string; full_name: string; email: string };
-    if (target.role === "owner") {
-      const { rows } = await client.query(
-        `SELECT COUNT(*)::int AS cnt FROM users WHERE account_id = $1 AND role = 'owner'`,
-        [session.accountId]
+    return await withTenantTransaction(session, async (client, accountId) => {
+      await lockOwnerMembershipChanges(client, accountId);
+      const actorMembership = await client.query<{ role: string }>(
+        `SELECT role FROM business_memberships
+          WHERE account_id = $1 AND user_id = $2 AND status = 'active'`,
+        [accountId, session.userId],
       );
-      if ((rows[0]?.cnt ?? 0) <= 1) {
-        await client.query("ROLLBACK");
+      if (actorMembership.rows[0]?.role !== "owner") {
         return NextResponse.json(
-          { error: { code: "FORBIDDEN", message: "Cannot remove the last owner", traceId: session.traceId } },
-          { status: 422 }
+          { error: { code: "FORBIDDEN", message: "Only current company owners can remove team members", traceId: session.traceId } },
+          { status: 403 },
         );
       }
-    }
 
-    await client.query(`DELETE FROM users WHERE id = $1 AND account_id = $2`, [id, session.accountId]);
-
-    await appendAuditLog(client, {
-      account_id: session.accountId,
-      entity_type: "user",
-      entity_id: id,
-      action: "delete",
-      actor_id: session.userId,
-      trace_id: session.traceId,
-      old_value: before.rows[0] as Record<string, unknown>,
-      new_value: null,
-    });
-
-    await client.query("COMMIT");
-    return NextResponse.json({ deleted: true });
-  } catch (error: unknown) {
-    await client.query("ROLLBACK");
-    // FK constraint — user has jobs/visits that reference them
-    if (typeof error === "object" && error !== null && "code" in error && (error as { code: string }).code === "23503") {
-      return NextResponse.json(
-        { error: { code: "CONSTRAINT", message: "This user has associated jobs or visits and cannot be removed", traceId: session.traceId } },
-        { status: 422 }
+      const before = await client.query(
+        `SELECT user_id AS id, role, status, id AS membership_id
+           FROM business_memberships
+          WHERE user_id = $1 AND account_id = $2 AND status <> 'revoked'`,
+        [id, accountId],
       );
+      if (!before.rowCount) {
+        return NextResponse.json({ error: { code: "NOT_FOUND", message: "User not found", traceId: session.traceId } }, { status: 404 });
+      }
+
+      const target = before.rows[0] as { role: string; status: string; membership_id: string };
+      if (target.role === "owner" && target.status === "active") {
+        const { rows } = await client.query<{ cnt: number }>(
+          `SELECT COUNT(*)::int AS cnt FROM business_memberships
+            WHERE account_id = $1 AND status = 'active' AND role = 'owner'`,
+          [accountId],
+        );
+        if ((rows[0]?.cnt ?? 0) <= 1) {
+          return NextResponse.json(
+            { error: { code: "FORBIDDEN", message: "Cannot remove the last owner", traceId: session.traceId } },
+            { status: 422 },
+          );
+        }
+      }
+
+      const runtime = await membershipRuntime();
+      await runtime.restrictMembershipForLegacyChangeRequest(
+        request, id, target.role, target.status, target.role, "revoked",
+      );
+
+      // Keep account_id-scoped legacy consumers from seeing a removed owner.
+      // This is constrained to the user's primary account; other memberships
+      // and their role authority are untouched.
+      if (target.status === "active") {
+        const primaryProfile = await client.query<{ id: string }>(
+          `SELECT id FROM users WHERE id = $1 AND account_id = $2`, [id, accountId],
+        );
+        if (primaryProfile.rowCount === 1) {
+          const profile = (await loadCompanyMemberDirectory(client, accountId)).find((member) => member.id === id);
+          if (profile) {
+            const dialect = client.dialect ?? getDatabaseDialect();
+            if (dialect === "postgres") {
+              const updated = await client.query<{ updated: boolean }>(
+                `SELECT public.app_update_company_member_profile($1::uuid, $2, $3, $4, 'tech') AS updated`,
+                [id, profile.full_name, profile.email, profile.phone],
+              );
+              if (updated.rows[0]?.updated !== true) throw new Error("Could not update primary-company role projection");
+            } else {
+              await client.query(
+                `UPDATE users SET role = 'tech', updated_at = now() WHERE id = $1 AND account_id = $2`,
+                [id, accountId],
+              );
+            }
+          }
+        }
+      }
+      await client.query(
+        `UPDATE business_memberships SET status = 'revoked', updated_at = now()
+          WHERE account_id = $1 AND user_id = $2 AND status <> 'revoked'`,
+        [accountId, id],
+      );
+
+      await appendAuditLog(client, {
+        account_id: accountId,
+        entity_type: "business_membership",
+        entity_id: target.membership_id,
+        action: "delete",
+        actor_id: session.userId,
+        trace_id: session.traceId,
+        old_value: before.rows[0] as Record<string, unknown>,
+        new_value: null,
+      });
+      return NextResponse.json({ deleted: true, membership_revoked: true });
+    });
+  } catch (error: unknown) {
+    if (error instanceof WebMembershipReconciliationError) {
+      return NextResponse.json({ error: {
+        code: "AUTHORITY_RECONCILIATION_UNAVAILABLE",
+        message: "Membership authority update is temporarily unavailable; retry the requested change",
+        traceId: session.traceId,
+      } }, { status: 503, headers: { "Retry-After": "1" } });
     }
     logger.error("DELETE /api/v1/users/[id] error", error, { traceId: session.traceId });
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Failed to remove user", traceId: session.traceId } },
       { status: 500 }
     );
-  } finally {
-    client.release();
   }
 });

@@ -5,7 +5,6 @@
  * Titan availability or grant Titan Workforce authority by default.
  */
 import type { DbClient } from "@/lib/db-contract";
-import { portableQuery } from "@/lib/db/portable";
 
 export type AvailabilityKind = "available" | "unavailable";
 export type AvailabilityWindow = {
@@ -76,8 +75,8 @@ export function isWithinAvailability(windows: AvailabilityWindow[], start: Date,
   return applicable.some((w) => w.kind === "available" && startMin >= minutesOfDay(w.startTime) && endMin <= minutesOfDay(w.endTime));
 }
 
-export async function loadAvailabilityForAccount(accountId: string): Promise<AvailabilityWindow[]> {
-  const rows = await portableQuery<DbWindow>(
+export async function loadAvailabilityForAccount(client: DbClient, accountId: string): Promise<AvailabilityWindow[]> {
+  const { rows } = await client.query<DbWindow>(
     `SELECT id, user_id, weekday, specific_date, start_time, end_time, availability_kind, note
        FROM technician_availability
       WHERE account_id = $1

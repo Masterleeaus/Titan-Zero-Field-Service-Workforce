@@ -6,6 +6,7 @@ import { getSqliteClient, withSqliteTransaction } from "./sqlite";
 import { rewriteNumberedParamsForMysql, type DbClient, type DbQueryResult } from "@/lib/db-contract";
 import type { SessionPayload } from "@/lib/auth/session";
 import { requireTenantAccountId } from "./contracts";
+import { assertTenantMembershipContext } from "./tenant-membership-context";
 
 // Keep the portable unknown[] contract at this driver boundary. mysql2 validates
 // parameter values at execution; do not detach execute/query from their receivers.
@@ -78,6 +79,14 @@ export async function withTenantTransaction<T>(session: SessionPayload, fn: (cli
         `SELECT set_config('app.current_user_id', $1, true), set_config('app.current_account_id', $2, true), set_config('app.current_role', $3, true)`,
         [session.userId, accountId, session.role],
       );
+
+      // After request authentication, check the selected compatibility-company
+      // membership inside the same RLS transaction.
+      // This is a request-time backstop while the canonical registry owner
+      // reconciles role/status changes. Keep it a plain SELECT: migration 190's
+      // UPDATE policies intentionally prevent non-manager sessions from
+      // acquiring row locks on membership records.
+      await assertTenantMembershipContext(client, session, accountId);
     }
     return fn(client, accountId);
   });

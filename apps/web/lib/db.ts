@@ -2,6 +2,7 @@ import { Pool } from "pg";
 import type { PoolClient } from "pg";
 import { getEnv } from "./env";
 import type { SessionPayload } from "./auth/session";
+import { assertTenantMembershipContext } from "./db/tenant-membership-context";
 
 export { getDatabaseDialect, inferDatabaseDialect } from "./db/dialect";
 export type { DatabaseDialect } from "./db/dialect";
@@ -45,6 +46,7 @@ export async function withDbSession<T>(
               set_config('app.current_role', $3, true)`,
       [session.userId, session.accountId, session.role],
     );
+    await assertTenantMembershipContext(client, session, session.accountId);
     const result = await fn(client);
     await client.query("COMMIT");
     return result;

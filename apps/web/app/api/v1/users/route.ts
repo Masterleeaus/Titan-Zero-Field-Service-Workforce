@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { hash } from "bcryptjs";
 import { withRole } from "@/lib/auth/middleware";
 import type { AuthSession } from "@/lib/auth/middleware";
-import { getPool, query } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/db/portable";
+import { loadCompanyMemberDirectory } from "@/lib/workforce/member-directory";
 import { appendAuditLog } from "@/lib/db/audit";
 import { logger } from "@/lib/logger";
 
@@ -18,13 +20,11 @@ const createUserBody = z.object({
 });
 
 export const GET = withRole(["owner", "admin"], async (_request: NextRequest, session: AuthSession) => {
-  const rows = await query(
-    `SELECT id, full_name, email, phone, role, created_at
-     FROM users
-     WHERE account_id = $1
-     ORDER BY role, full_name`,
-    [session.accountId]
-  );
+  const rows = await withTenantTransaction(session, async (client, accountId) => {
+    return (await loadCompanyMemberDirectory(client, accountId)).map(({ id, full_name, email, phone, role, created_at }) => ({
+      id, full_name, email, phone, role, created_at,
+    }));
+  });
   return NextResponse.json({ data: rows });
 });
 
@@ -49,67 +49,63 @@ export const POST = withRole(["owner", "admin"], async (request: NextRequest, se
   const { full_name, email, phone, role, password } = parsed.data;
   const password_hash = await hash(password, 12);
 
-  const pool = getPool();
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    await client.query(
-      `SELECT set_config('app.current_user_id', $1, true),
-              set_config('app.current_account_id', $2, true),
-              set_config('app.current_role', $3, true)`,
-      [session.userId, session.accountId, session.role]
-    );
+    const result = await withTenantTransaction(session, async (client, accountId) => {
+      // Check for duplicate email within the verified tenant transaction.
+      const existing = await client.query(
+        `SELECT id FROM users WHERE account_id = $1 AND email = $2`,
+        [accountId, email.toLowerCase().trim()],
+      );
+      if (existing.rowCount && existing.rowCount > 0) return { conflict: true as const };
 
-    // Check for duplicate email within account
-    const existing = await client.query(
-      `SELECT id FROM users WHERE account_id = $1 AND email = $2`,
-      [session.accountId, email.toLowerCase().trim()]
-    );
-    if (existing.rowCount && existing.rowCount > 0) {
-      await client.query("ROLLBACK");
+      const userId = randomUUID();
+      await client.query(
+        `INSERT INTO users (id, account_id, full_name, email, phone, role, password_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [userId, accountId, full_name, email.toLowerCase().trim(), phone || null, role, password_hash],
+      );
+
+      // Session resolution requires an explicit active membership. Keep creation
+      // atomic so a membership failure cannot leave an unusable principal behind.
+      await client.query(
+        `INSERT INTO business_memberships (account_id, user_id, role, status)
+         VALUES ($1, $2, $3, 'active')`,
+        [accountId, userId, role],
+      );
+      // The users SELECT policy requires an active company membership. Read
+      // RETURNING fields only after the membership row exists.
+      const newUserResult = await client.query(
+        `SELECT id, full_name, email, phone, role, created_at
+           FROM users WHERE id = $1 AND account_id = $2`,
+        [userId, accountId],
+      );
+      const newUser = newUserResult.rows[0];
+      if (!newUser) throw new Error("CREATED_USER_NOT_VISIBLE_AFTER_MEMBERSHIP");
+
+      await appendAuditLog(client, {
+        account_id: accountId,
+        entity_type: "user",
+        entity_id: newUser.id as string,
+        action: "insert",
+        actor_id: session.userId,
+        trace_id: session.traceId,
+        old_value: null,
+        new_value: { full_name, email, phone: phone || null, role },
+      });
+      return { conflict: false as const, user: newUser };
+    });
+    if (result.conflict) {
       return NextResponse.json(
         { error: { code: "CONFLICT", message: "A user with that email already exists", traceId: session.traceId } },
-        { status: 409 }
+        { status: 409 },
       );
     }
-
-    const { rows } = await client.query(
-      `INSERT INTO users (account_id, full_name, email, phone, role, password_hash)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, full_name, email, phone, role, created_at`,
-      [session.accountId, full_name, email.toLowerCase().trim(), phone || null, role, password_hash]
-    );
-    const newUser = rows[0];
-
-    // Session resolution requires an explicit active membership. Keep creation
-    // atomic so a membership failure cannot leave an unusable principal behind.
-    await client.query(
-      `INSERT INTO business_memberships (account_id, user_id, role, status)
-       VALUES ($1, $2, $3, 'active')`,
-      [session.accountId, newUser.id, role]
-    );
-
-    await appendAuditLog(client, {
-      account_id: session.accountId,
-      entity_type: "user",
-      entity_id: newUser.id as string,
-      action: "insert",
-      actor_id: session.userId,
-      trace_id: session.traceId,
-      old_value: null,
-      new_value: { full_name, email, phone: phone || null, role },
-    });
-
-    await client.query("COMMIT");
-    return NextResponse.json({ data: newUser }, { status: 201 });
+    return NextResponse.json({ data: result.user }, { status: 201 });
   } catch (error) {
-    await client.query("ROLLBACK");
     logger.error("POST /api/v1/users error", error, { traceId: session.traceId });
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Failed to create user", traceId: session.traceId } },
       { status: 500 }
     );
-  } finally {
-    client.release();
   }
 });
