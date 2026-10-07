@@ -10,17 +10,21 @@ import { ExecutionGateway, EXECUTION_CLASSES } from "../../../packages/tools/exe
 
 async function fixture(t) {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), "titan-file-bridge-"));
-  const base = path.join(temp, "domains", "titanzero.io");
+  const domainsRoot = path.join(temp, "domains");
+  const base = path.join(domainsRoot, "titanzero.io");
   const docroot = path.join(base, "public_html");
+  const futureDocroot = path.join(domainsRoot, "future.titanzero.io", "public_html");
+  const otherDocroot = path.join(domainsRoot, "titanzero.pro", "public_html");
   const appRoot = path.join(temp, "apps", "desk");
-  await Promise.all([docroot, appRoot, path.join(base, "desk"), path.join(base, "future"), path.join(base, ".ssh")].map((p) => fs.mkdir(p, { recursive: true })));
+  await Promise.all([docroot, futureDocroot, otherDocroot, appRoot, path.join(base, "desk"), path.join(base, ".ssh")].map((p) => fs.mkdir(p, { recursive: true })));
   await fs.writeFile(path.join(docroot, "index.html"), "<h1>Titan</h1>");
   await fs.writeFile(path.join(docroot, ".env"), "secret");
   await fs.writeFile(path.join(docroot, "visible.txt"), "safe");
   const domains = [
     { domain: "titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: docroot, writable: true },
     { domain: "desk.titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: path.join(base, "desk"), writable: true },
-    { domain: "future.titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: path.join(base, "future"), writable: false },
+    { domain: "future.titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: futureDocroot, writable: false },
+    { domain: "misdirected.titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: otherDocroot, writable: false },
     { domain: "credentials.titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: path.join(base, ".ssh"), writable: true },
     { domain: "other.example", root_domain: "example", company_id: "company-a", registered: true, canonical_document_root: "/etc" },
     { domain: "titanzero.pro", root_domain: "titanzero.pro", company_id: "company-a", registered: true, canonical_document_root: "/etc" },
@@ -28,7 +32,7 @@ async function fixture(t) {
   const audit = [];
   let revoked = false, observedAt = new Date().toISOString();
   const provider = new TitanFileBridgeProvider({
-    domainsRoot: path.join(temp, "domains"),
+    domainsRoot,
     applicationRootBase: path.join(temp, "apps"),
     applicationRoots: APP_ROOTS.map((x) => ({ ...x, path: path.join(temp, "apps", x.id) })),
     domainProvider: { async listRegisteredDomains() { return { domains, observed_at: observedAt }; } },
@@ -38,7 +42,7 @@ async function fixture(t) {
   });
   const context = { company_id: "company-a", actor_id: "owner-1", session_ref: "session-1", correlation_id: "corr-1" };
   t.after(() => fs.rm(temp, { recursive: true, force: true }));
-  return { provider, context, audit, domains, docroot, setRevoked(x) { revoked = x; }, setObservedAt(x) { observedAt = x; } };
+  return { provider, context, audit, domains, docroot, futureDocroot, domainsRoot, setRevoked(x) { revoked = x; }, setObservedAt(x) { observedAt = x; } };
 }
 const call = (f, capability, input = {}, context = f.context) => f.provider.call({ ...context, capability, input });
 const rootFor = (roots, domain = "titanzero.io", kind = "domain") => roots.find((x) => x.domain === domain && x.kind === kind);
@@ -61,9 +65,9 @@ test("DirectAdmin inventory uses the fixed admin API, filters to its configured 
       assert.equal(url.searchParams.get("json"), "yes");
       assert.equal(url.searchParams.get("action"), "document_root_all");
       assert.equal(Buffer.from(authorization.slice("Basic ".length), "base64").toString(), "admin:server-only-login-key");
-      assert.equal(timeoutMs, 5000);
+      assert.equal(timeoutMs, 30000);
       return { users: {
-        admin: { domains: { "titanzero.io": { public_html: "/home/admin/domains/titanzero.io/public_html", subdomains: { desk: { public_html: "/home/admin/domains/titanzero.io/public_html/desk" }, future: { public_html: "/home/admin/domains/titanzero.io/public_html/future" } } }, "titanzero.pro": { public_html: "/etc" } } },
+        admin: { domains: { "titanzero.io": { public_html: "/home/admin/domains/titanzero.io/public_html", subdomains: { desk: { public_html: "/home/admin/domains/titanzero.io/public_html/desk" }, future: { public_html: "/home/admin/domains/future.titanzero.io/public_html" } } }, "titanzero.pro": { public_html: "/etc" } } },
         another: { domains: { "fake.titanzero.io": { public_html: "/etc" } } },
       } };
     },
@@ -72,6 +76,7 @@ test("DirectAdmin inventory uses the fixed admin API, filters to its configured 
   assert.deepEqual(inventory.domains.map(row => row.domain), ["desk.titanzero.io", "future.titanzero.io", "titanzero.io"]);
   assert.equal(inventory.domains.find(row => row.domain === "titanzero.io").writable, true);
   assert.equal(inventory.domains.find(row => row.domain === "future.titanzero.io").writable, false);
+  assert.equal(inventory.domains.find(row => row.domain === "future.titanzero.io").canonical_document_root, "/home/admin/domains/future.titanzero.io/public_html");
   assert.equal(JSON.stringify(inventory).includes("server-only-login-key"), false);
   await assert.rejects(provider.listRegisteredDomains({ company_id: "company-b", root_domain: "titanzero.io" }), /file_company_scope_denied/);
   assert.equal(calls, 1);
@@ -82,6 +87,7 @@ test("DirectAdmin inventory refuses unpinned or non-TLS panel origins", () => {
   for (const origin of ["http://panel.example.test:2222", "https://panel.example.test:443", "https://user:pass@panel.example.test:2222", "https://panel.example.test:2222/path"]) {
     assert.throws(() => new DirectAdminDomainInventoryProvider({ ...common, origin }), /directadmin_origin/);
   }
+  assert.throws(() => new DirectAdminDomainInventoryProvider({ ...common, origin: "https://panel.example.test:2222", timeoutMs: 30001 }), /directadmin_inventory_timeout_invalid/);
 });
 
 test("enumerates only registered Titan domains and explicitly commissioned app roots", async (t) => {
@@ -92,6 +98,8 @@ test("enumerates only registered Titan domains and explicitly commissioned app r
     ["domain", "future.titanzero.io", null],
     ["domain", "titanzero.io", null],
   ]);
+  assert.equal(roots.find((x) => x.domain === "future.titanzero.io" && x.kind === "domain").canonical_path, f.futureDocroot);
+  assert.ok(!roots.some((x) => x.domain === "misdirected.titanzero.io"), "a registered subdomain cannot point into a different domain's tree");
   assert.ok(roots.every((x) => x.company_id === "company-a"));
   assert.ok(!roots.some((x) => x.domain.endsWith("titanzero.pro")));
   assert.equal(APP_ROOTS.length, 4);
@@ -115,13 +123,22 @@ test("application mappings cannot escape their named app directory and sensitive
 
 test("lists, stats, and reads files while protecting secrets", async (t) => {
   const f = await fixture(t), root = rootFor((await call(f, "files.roots")).roots);
+  await fs.mkdir(path.join(f.docroot, ".git"));
+  await fs.writeFile(path.join(f.docroot, ".git", "config"), "credential = leak-me");
+  await fs.writeFile(path.join(f.docroot, "database.php"), "password = leak-me");
+  await fs.writeFile(path.join(f.docroot, "database.sqlite"), "raw database bytes");
   const list = await call(f, "files.list", { root_id: root.root_id, path: "" });
   assert.ok(list.entries.some((x) => x.name === "index.html"));
-  assert.ok(!list.entries.some((x) => x.name === ".env"));
+  for (const hidden of [".env", ".git", "database.php", "database.sqlite"]) {
+    assert.ok(!list.entries.some((x) => x.name === hidden), "sensitive path must be omitted from listings");
+  }
   assert.equal((await call(f, "files.stat", { root_id: root.root_id, path: "visible.txt" })).size_bytes, 4);
   const read = await call(f, "files.read", { root_id: root.root_id, path: "index.html" });
   assert.equal(read.content_base64, Buffer.from("<h1>Titan</h1>").toString("base64"));
   await assert.rejects(call(f, "files.read", { root_id: root.root_id, path: ".env" }), /file_secret_denied/);
+  for (const secretPath of [".git/config", "database.php", "database.sqlite"]) {
+    await assert.rejects(call(f, "files.read", { root_id: root.root_id, path: secretPath }), /file_secret_denied/);
+  }
 });
 
 test("directory listing stops at the bounded entry limit", async (t) => {
@@ -188,11 +205,16 @@ test("archives omit secrets, generated trees, and symlinks", async (t) => {
   await fs.mkdir(path.join(f.docroot, "node_modules"));
   await fs.writeFile(path.join(f.docroot, "node_modules", "hidden.js"), "excluded");
   await fs.writeFile(path.join(f.docroot, "token-store.json"), "secret");
+  await fs.mkdir(path.join(f.docroot, ".git"));
+  await fs.writeFile(path.join(f.docroot, ".git", "config"), "credential = leak-me");
+  await fs.writeFile(path.join(f.docroot, "database.sqlite"), "raw database bytes");
   await fs.symlink("/etc/passwd", path.join(f.docroot, "escape"));
   const result = await call(f, "files.downloadArchive", { root_id: root.root_id, path: "" });
   const tar = gunzipSync(Buffer.from(result.archive_base64, "base64")).toString("utf8");
   assert.ok(tar.includes("index.html"));
   assert.ok(!tar.includes("token-store.json"));
+  assert.ok(!tar.includes(".git"));
+  assert.ok(!tar.includes("database.sqlite"));
   assert.ok(!tar.includes("hidden.js"));
   assert.ok(!tar.includes("escape"));
   assert.ok(result.archive_bytes <= FILE_LIMITS.archiveOutputBytes);
