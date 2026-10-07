@@ -192,7 +192,15 @@ export function ActivityStream() {
     return rows;
   }, [events, selectedFilters, tab]);
 
-  const pinnedEvents = useMemo(() => visibleEvents.filter((event) => !event.read_at).slice(0, 3), [visibleEvents]);
+  const pinnedEvents = useMemo(() => visibleEvents
+    .filter((event) => !event.read_at)
+    .sort((left, right) => {
+      const rank: Record<CardTone, number> = { critical: 0, attention: 1, neutral: 2, positive: 3 };
+      const priorityDifference = rank[toneFor(left)] - rank[toneFor(right)];
+      if (priorityDifference !== 0) return priorityDifference;
+      return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+    })
+    .slice(0, 3), [visibleEvents]);
   const pinnedIds = useMemo(() => new Set(pinnedEvents.map((event) => event.id)), [pinnedEvents]);
   const activityEvents = useMemo(() => visibleEvents.filter((event) => !pinnedIds.has(event.id)), [visibleEvents, pinnedIds]);
 
