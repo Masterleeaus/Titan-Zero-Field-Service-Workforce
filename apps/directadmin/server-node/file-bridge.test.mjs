@@ -13,7 +13,7 @@ async function fixture(t) {
   const base = path.join(temp, "domains", "titanzero.io");
   const docroot = path.join(base, "public_html");
   const appRoot = path.join(temp, "apps", "desk");
-  await Promise.all([docroot, appRoot, path.join(base, "desk"), path.join(base, "future")].map((p) => fs.mkdir(p, { recursive: true })));
+  await Promise.all([docroot, appRoot, path.join(base, "desk"), path.join(base, "future"), path.join(base, ".ssh")].map((p) => fs.mkdir(p, { recursive: true })));
   await fs.writeFile(path.join(docroot, "index.html"), "<h1>Titan</h1>");
   await fs.writeFile(path.join(docroot, ".env"), "secret");
   await fs.writeFile(path.join(docroot, "visible.txt"), "safe");
@@ -21,6 +21,7 @@ async function fixture(t) {
     { domain: "titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: docroot, writable: true },
     { domain: "desk.titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: path.join(base, "desk"), writable: true },
     { domain: "future.titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: path.join(base, "future"), writable: false },
+    { domain: "credentials.titanzero.io", root_domain: "titanzero.io", company_id: "company-a", registered: true, canonical_document_root: path.join(base, ".ssh"), writable: true },
     { domain: "other.example", root_domain: "example", company_id: "company-a", registered: true, canonical_document_root: "/etc" },
     { domain: "titanzero.pro", root_domain: "titanzero.pro", company_id: "company-a", registered: true, canonical_document_root: "/etc" },
   ];
@@ -28,7 +29,8 @@ async function fixture(t) {
   let revoked = false, observedAt = new Date().toISOString();
   const provider = new TitanFileBridgeProvider({
     domainsRoot: path.join(temp, "domains"),
-    applicationRoots: APP_ROOTS.map((x) => x.id === "desk" ? { ...x, path: appRoot } : x),
+    applicationRootBase: path.join(temp, "apps"),
+    applicationRoots: APP_ROOTS.map((x) => ({ ...x, path: path.join(temp, "apps", x.id) })),
     domainProvider: { async listRegisteredDomains() { return { domains, observed_at: observedAt }; } },
     auditSink: async (event) => { audit.push(event); },
     revocationStore: { async isRevoked() { return revoked; }, async revoke() { revoked = true; } },
@@ -95,6 +97,22 @@ test("enumerates only registered Titan domains and explicitly commissioned app r
   assert.equal(APP_ROOTS.length, 4);
 });
 
+test("application mappings cannot escape their named app directory and sensitive docroots are excluded", async (t) => {
+  const common = {
+    domainProvider: { async listRegisteredDomains() { return { domains: [], observed_at: new Date().toISOString() }; } },
+    auditSink: async () => {},
+    revocationStore: { async isRevoked() { return false; }, async revoke() {} },
+  };
+  assert.throws(() => new TitanFileBridgeProvider({
+    ...common,
+    applicationRoots: [{ ...APP_ROOTS[0], path: "/etc" }],
+    commissionedApplications: [{ id: "desk", writable: true }],
+  }), /invalid-application-root/);
+
+  const f = await fixture(t), roots = (await call(f, "files.roots")).roots;
+  assert.equal(roots.some(root => root.domain === "credentials.titanzero.io"), false);
+});
+
 test("lists, stats, and reads files while protecting secrets", async (t) => {
   const f = await fixture(t), root = rootFor((await call(f, "files.roots")).roots);
   const list = await call(f, "files.list", { root_id: root.root_id, path: "" });
@@ -104,6 +122,14 @@ test("lists, stats, and reads files while protecting secrets", async (t) => {
   const read = await call(f, "files.read", { root_id: root.root_id, path: "index.html" });
   assert.equal(read.content_base64, Buffer.from("<h1>Titan</h1>").toString("base64"));
   await assert.rejects(call(f, "files.read", { root_id: root.root_id, path: ".env" }), /file_secret_denied/);
+});
+
+test("directory listing stops at the bounded entry limit", async (t) => {
+  const f = await fixture(t), root = rootFor((await call(f, "files.roots")).roots);
+  for (let index = 0; index <= FILE_LIMITS.directoryEntries; index += 1) {
+    await fs.writeFile(path.join(f.docroot, `entry-${index}`), "");
+  }
+  await assert.rejects(call(f, "files.list", { root_id: root.root_id, path: "" }), /file_directory_entry_limit/);
 });
 
 test("rejects traversal, foreign-company roots, unrelated domains, and symlink escapes", async (t) => {
