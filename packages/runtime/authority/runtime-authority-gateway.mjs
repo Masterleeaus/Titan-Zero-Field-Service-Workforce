@@ -37,7 +37,7 @@ export class RuntimeAuthorityGateway {
     });
   }
 
-  async execute({decision,capability,input,idempotency_key,company_id,work_id,agent_id,run_id,signal}){
+  async execute({decision,capability,input,idempotency_key,company_id,actor_id,work_id,agent_id,run_id,correlation_id,signal}){
     const previous=decision?.canonical;
     if(!previous)throw new Error("runtime-canonical-authority-decision-required");
     const capabilityName=required(capability?.name??previous.capability,"runtime-capability-required");
@@ -84,6 +84,8 @@ export class RuntimeAuthorityGateway {
       now:nextEvaluationTime(parent),
     });
 
+    if(actor_id!==undefined&&actor_id!==current.actor_id)throw new Error("runtime-actor-mismatch");
+
     if(this.authorityStore?.appendDecision)await this.authorityStore.appendDecision(current);
     assertAuthorityDecisionAllowsExecution(current,{
       company_id,
@@ -96,9 +98,11 @@ export class RuntimeAuthorityGateway {
       execution_id:`execution:${company_id}:${operationId}:${idempotencyKey}`,
       company_id,
       decision_id:current.authority_decision_id,
+      actor_id:current.actor_id,
       supersedes_decision_id:parent.authority_decision_id,
       work_id,
       run_id,
+      ...(correlation_id === undefined ? {} : {correlation_id}),
       agent_id,
       capability:capabilityName,
       input,

@@ -12,13 +12,20 @@ import {
 import { verifyCompanyNativeSchemaAttestation } from "../../../packages/storage/src/company-native-schema-attestation.js";
 import { companyNativeWorkOrdersManifest } from "../../../packages/storage/src/company-native-schema-manifest.js";
 import { IdentitySessionRegistry } from "../../../packages/titan-platform/src/security-boundary.js";
+import type { createSessionCredentialService } from "../../../packages/titan-platform/src/security-boundary.js";
+import { DirectAdminSessionBridge } from "../../../packages/titan-platform/src/directadmin-session-bridge.js";
+import { createDirectAdminGateway, type DirectAdminBootstrapAssertionProvider,
+  type DirectAdminGatewayOwners } from "../../../packages/titan-platform/src/directadmin-gateway.js";
 import { createWorkforceSessionCredentialVerifier } from "./session-credential-verifier.js";
+import type { DirectAdminBootstrapNonceFlow } from "./directadmin-bootstrap-nonce-route.js";
 import type { HostedWorkforceDependencies } from "./hosted-runtime.js";
 // @ts-expect-error The native FSM owner is TypeScript and runs through the configured tsx loader.
 import { createNativeWorkOrders } from "./native-work-orders.mjs";
 
 type WorkforceEnvironment = Readonly<Record<string, string | undefined>>;
 type DirectAdminDependencies = NonNullable<HostedWorkforceDependencies["directAdmin"]>;
+type DirectAdminSessions = Pick<ReturnType<typeof createSessionCredentialService>,
+  "issue" | "authenticate" | "switchCompany" | "revoke" | "exchangeWorkforceZero">;
 type PublicAlgorithm = "EdDSA" | "ES256" | "RS256";
 
 function required(environment: WorkforceEnvironment, name: string): string {
@@ -36,15 +43,14 @@ function absolutePath(environment: WorkforceEnvironment, name: string): string {
 }
 
 /**
- * Load only the operator-owned #1049/#302 bridge composition. This runtime
- * owns mounting its existing gateway factory, not issuing assertions, mapping
- * DirectAdmin identities, or provisioning credentials. No module means the
- * DirectAdmin route remains disabled; a configured but invalid module fails
- * startup rather than silently dropping the mount. #302's published producer
- * requires a host-supplied atomic pre-auth nonce consumer; never replace it with
- * process-local replay state in this runtime.
+ * Load only the operator-owned #302 session service and trusted #302/#1049
+ * bootstrap flow. Workforce constructs the canonical #1049 bridge and
+ * gateway itself; the operator module cannot substitute a request handler.
+ * No module means the route remains disabled; a configured invalid module
+ * fails startup. The provider must own authenticated DirectAdmin proof and an
+ * atomic pre-auth nonce consumer; never replace them with local replay state.
  */
-async function loadDirectAdminDependencies(environment: WorkforceEnvironment): Promise<DirectAdminDependencies | undefined> {
+async function loadDirectAdminDependencies(environment: WorkforceEnvironment, nodeId: string): Promise<DirectAdminDependencies | undefined> {
   const name = "WORKFORCE_DIRECTADMIN_DEPENDENCIES_MODULE";
   const modulePath = environment[name];
   if (modulePath === undefined || modulePath === "") return undefined;
@@ -55,7 +61,7 @@ async function loadDirectAdminDependencies(environment: WorkforceEnvironment): P
   let module: Record<string, unknown>;
   try { module = await import(pathToFileURL(modulePath).href); }
   catch { throw new Error("workforce-directadmin-dependencies-unavailable"); }
-  const create = module.createWorkforceDirectAdminDependencies;
+  const create = module.createWorkforceDirectAdminHostServices;
   if (typeof create !== "function") throw new Error("workforce-directadmin-dependencies-factory-required");
 
   let value: unknown;
@@ -65,12 +71,33 @@ async function loadDirectAdminDependencies(environment: WorkforceEnvironment): P
     throw new Error("workforce-directadmin-dependencies-invalid");
   }
   const candidate = value as Record<string, unknown>;
-  if (typeof candidate.publicOrigin !== "string" || typeof candidate.createGateway !== "function") {
+  const sessions = candidate.sessions;
+  const bootstrapProvider = candidate.bootstrapProvider;
+  const bootstrapNonceFlow = candidate.bootstrapNonceFlow;
+  if (typeof candidate.publicOrigin !== "string" || !sessions || typeof sessions !== "object" || Array.isArray(sessions) ||
+      !["issue", "authenticate", "switchCompany", "revoke", "exchangeWorkforceZero"]
+        .every(method => typeof (sessions as Record<string, unknown>)[method] === "function") ||
+      !bootstrapProvider || typeof bootstrapProvider !== "object" || Array.isArray(bootstrapProvider) ||
+      typeof (bootstrapProvider as Record<string, unknown>).provide !== "function" ||
+      (bootstrapNonceFlow !== undefined && (bootstrapNonceFlow !== bootstrapProvider ||
+        typeof (bootstrapNonceFlow as Record<string, unknown>).issueNonceForUniqueCurrentContext !== "function"))) {
     throw new Error("workforce-directadmin-dependencies-invalid");
   }
+  let bridge: DirectAdminSessionBridge;
+  try {
+    bridge = new DirectAdminSessionBridge({
+      origin: candidate.publicOrigin,
+      audience: `titan-directadmin:${nodeId}`,
+      node_id: nodeId,
+      sessions: sessions as DirectAdminSessions,
+    });
+  } catch { throw new Error("workforce-directadmin-dependencies-invalid"); }
+  const provider = bootstrapProvider as DirectAdminBootstrapAssertionProvider;
   return Object.freeze({
     publicOrigin: candidate.publicOrigin,
-    createGateway: candidate.createGateway as DirectAdminDependencies["createGateway"],
+    createGateway: (owners: Parameters<DirectAdminDependencies["createGateway"]>[0]) =>
+      createDirectAdminGateway(bridge, owners as DirectAdminGatewayOwners, provider),
+    ...(bootstrapNonceFlow === undefined ? {} : { bootstrapNonceFlow: bootstrapNonceFlow as DirectAdminBootstrapNonceFlow }),
   });
 }
 
@@ -172,7 +199,8 @@ export async function createWorkforceDependencies(
   const upstreamAlgorithm = algorithm(environment, "WORKFORCE_UPSTREAM_SESSION_ALGORITHM");
   const workforceVerificationKey = await loadPublicKey(environment, "WORKFORCE_SESSION_PUBLIC_KEY_PATH", "WORKFORCE_SESSION_ALGORITHM");
   const upstreamVerificationKey = await loadPublicKey(environment, "WORKFORCE_UPSTREAM_SESSION_PUBLIC_KEY_PATH", "WORKFORCE_UPSTREAM_SESSION_ALGORITHM");
-  const directAdmin = await loadDirectAdminDependencies(environment);
+  const directAdminNodeId = required(environment, "WORKFORCE_DIRECTADMIN_NODE_ID");
+  const directAdmin = await loadDirectAdminDependencies(environment, directAdminNodeId);
 
   // These files and registry records are commissioned outside this module. The
   // placement owner reads an already migrated registry; it does not initialize it.
@@ -193,7 +221,7 @@ export async function createWorkforceDependencies(
     const physicalCompanyStoreOpener = createSqliteCompanyStoreOpener({ companyStoreRoot });
     const credentialVerifier = createWorkforceSessionCredentialVerifier({
       registry: identityRegistry,
-      directadmin: { node_id: required(environment, "WORKFORCE_DIRECTADMIN_NODE_ID") },
+      directadmin: { node_id: directAdminNodeId },
       issuer: required(environment, "WORKFORCE_SESSION_ISSUER"),
       key_id: required(environment, "WORKFORCE_SESSION_KEY_ID"),
       algorithm: workforceAlgorithm,

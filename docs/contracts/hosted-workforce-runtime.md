@@ -40,13 +40,19 @@ liveness/storage, but readiness stays 503 and conversation ingress stays disable
 
 The production dependency factory optionally loads the absolute
 `WORKFORCE_DIRECTADMIN_DEPENDENCIES_MODULE`. That operator-owned module exports
-`createWorkforceDirectAdminDependencies()` and returns the existing
-`{ publicOrigin, createGateway(owners) }` mount seam. It must compose the canonical
-#1049 gateway with the #302 identity/credential producer. If omitted, the
-DirectAdmin routes remain disabled; if configured but invalid, startup fails.
+`createWorkforceDirectAdminHostServices()` and returns
+`{ publicOrigin, sessions, bootstrapProvider }`. `sessions` must be the canonical
+#302 credential service port (`issue`, `authenticate`, `switchCompany`,
+`revoke`, and `exchangeWorkforceZero`); `bootstrapProvider` implements the
+#1049 trusted assertion-provider contract. Workforce constructs
+`DirectAdminSessionBridge` with the configured node audience and constructs
+`createDirectAdminGateway` with the hosted Workforce owners. The operator module
+cannot inject or replace an HTTP request handler. If omitted, DirectAdmin
+routes remain disabled; if configured but invalid, startup fails.
 The module must be included in the reviewed image or mounted read-only through
 an operator Compose override; the base Compose file does not mount this optional
-file. The Workforce host does not supply an assertion issuer or nonce store.
+file. The Workforce host does not issue assertions, provision identities, or
+provide a nonce store.
 
 Use `createWorkforceSessionCredentialVerifier` from
 `services/workforce/src/session-credential-verifier.ts` for canonical #302 signed
@@ -61,55 +67,101 @@ Workforce-audience authentication handoff remains with #302/#1049.
 
 ## DirectAdmin Workforce composition handoff
 
-`HostedWorkforceDependencies.directAdmin` is an optional operator-owned seam:
-it supplies a fixed HTTPS `publicOrigin` and a `createGateway(owners)` factory.
-That factory must compose #1049's canonical `DirectAdminSessionBridge` and
-`createDirectAdminGateway` with #302's canonical DirectAdmin-to-Workforce
-exchange/lineage owner. A standalone Workforce credential is insufficient:
+`HostedWorkforceDependencies.directAdmin` is an internal source-composed seam:
+it contains a fixed HTTPS `publicOrigin` and the SDK gateway factory created by
+the production dependency owner. The operator module supplies only #302's
+session service and #1049's trusted bootstrap provider. A standalone Workforce
+credential is insufficient:
 revalidating the derived session must observe source DirectAdmin company switch
 and revocation. Those exchange semantics are not implemented by this host.
-The launched server only translates and mounts the resulting Fetch handler at
-`/v1/directadmin/*`; it does not copy the browser cookie, CSRF, context-switch,
-logout or transport implementation. It pins the Fetch URL to `publicOrigin`,
-checks the incoming Host against that origin, forwards only the headers the
-shared SDK consumes, and never forwards the Workforce `Authorization` token.
-Without the separate bridge composition, DirectAdmin paths return read-only
-503. No audience or issuer is synthesized by the Workforce host.
-The #1049 bootstrap provider contract merged as PR #1252. The #302 producer
-merged as PR #1263: it authenticates the supplied DirectAdmin Cookie
-against the configured `/api/session`, then calls an injected
-`DirectAdminBootstrapNonceConsumer` with the verified issuer/effective subject,
-presentation role, login-as provenance and nonce. That consumer must atomically
-return the current selected company/device. The #1263 tests use an in-memory
-`Set`; it does not provide the production durable nonce consumer. The #812 RAW
-relay core accepts only the `__Host-titan-da-session` cookie and drops other
-cookie names; its production loader currently fails closed with
-`cookie_boundary_unverified`. The producer needs the authenticated
-pre-authentication DirectAdmin `/api/session` cookie, so the existing relay
-contract and disabled production path do not yet complete bootstrap together.
-Keep the optional module unset until the durable consumer and authenticated
-proof transport are both supplied by their owners.
+The launched server pins the Fetch URL to `publicOrigin` and checks incoming
+Host against that origin. It forwards the bootstrap nonce only for the exact
+bootstrap POST, drops cookies and Authorization from bootstrap, and forwards
+only the `__Host-titan-da-session` cookie on existing-session routes. A caller
+disconnect aborts the SDK `Request.signal`; the SDK passes that signal to the
+Workforce owner. Without the separate bridge composition, DirectAdmin paths
+return read-only 503. No browser authentication or business authority is
+synthesized by the Workforce host.
+The #1049 bootstrap provider contract merged as PR #1252. PR #1292 added the
+durable, one-time #302 nonce store and `createDirectAdminBootstrapFlow()`, which
+combines nonce issuance and the assertion provider. Both issuance and redemption
+authenticate the allowlisted DirectAdmin session/key cookies against the
+configured `/api/session`; nonce redemption also revalidates the bound actor,
+company, device and current identity generation. The #812 RAW relay and this
+Workforce bootstrap ingress intentionally strip cookies, so the provider
+receives `cookie: null` and fails closed. #1300 owns the trusted page/session
+composition that must issue the nonce and redeem it where those cookies remain
+inside the DirectAdmin trust boundary. Do not widen the generic relay cookie
+allowlist or infer production bootstrap from this mount regression.
 
 The Workforce gateway owner builds
 `GET /v1/directadmin/titan_workforce/projection` from company-filtered canonical
 `SqliteWorkforceStore` worker/work records and `SqliteRunStore` run references.
 Its payload uses `data.schema = "titan.workforce-cockpit.v1"` and repeats the
 selected `company_id` in the envelope, discovery and status. Evidence references
-are the stored canonical work references; they are not a claim that every row
-is an accepted terminal outcome. The projection returns `controls: []` until
-canonical DirectAdmin management authorization and accepted-evidence owners are
-available.
+are the stored canonical work references; they do not claim each work row is an
+accepted terminal outcome. The gateway authenticates the DirectAdmin
+session and current company before projecting it, then revalidates the session
+after the read. `discovery.controls` contains only the `reassign` descriptor
+when the canonical human-worker binding, current management grant, access,
+policy, risk, assurance, evidence and exposure checks permit it. That descriptor
+is read-only and declares `requires_fresh_approval: true` and
+`grants_authority: false`; it does not carry an authority decision.
 
-The consumer's current pause, resume, cancel, reassign, escalate and revoke
-intent names are proposals only. The owner validates the bound company, actor,
-operation/correlation IDs and bounded input, revalidates the current session,
-then rejects each proposal without calling unauthorised `WorkforceService`
-lifecycle methods, changing state, appending an event, or creating a receipt.
-Unknown actions are invalid. The owner raises a typed 403 unsupported-action
-denial. The merged #1049 gateway maps typed owner denials to sanitized status
-codes. Its `titan_workforce` route allowlist is still an integration dependency;
-#1260 contains the consumer-side work and remains open. The host mount and these
-contracts are not commissioned behavior.
+The canonical authenticated intent endpoint is
+`POST /v1/directadmin/titan_workforce/intents`. It requires the same-origin
+DirectAdmin session cookie and CSRF proof used by other established-session
+routes, plus JSON containing exactly `company_id`, `actor_id`, `context_revision`,
+`capability_id`, `operation_id`, `correlation_id`, and `input`. The context
+revision is the SDK's `ctx1_` assertion over the current session revision. For
+the only supported mutation, `capability_id` is
+`titan.workforce.reassign` and `input` is exactly `{ action: "reassign",
+work_id, expected_assignee_id, target_worker_id, reason }`. The owner checks the
+company/actor/session binding, revalidates source and derived sessions, requires
+READY work and a current bound human manager, checks target eligibility and
+the exact expected assignee, then runs the existing authority, execution and
+accepted-evidence owners. It requires a fresh operation-scoped approval and
+rechecks current management authority in the same transaction as the
+assignee compare-and-set. Pause, resume, cancel, escalate and revoke remain
+unsupported and are rejected without a lifecycle write.
+
+An accepted intent returns HTTP `202` with exactly `{ status: "REQUESTED",
+receipt_id, correlation_id }`. `receipt_id` is the durable accepted evidence ID,
+not a claim that the browser has verified a business outcome. The canonical
+projection then carries that accepted evidence reference on the reassigned work.
+The execution idempotency key is
+`titan.workforce.reassign:<operation_id>`; replaying the same company,
+operation, correlation and input after a Workforce restart returns the same
+accepted evidence ID and does not duplicate the reassignment event. A recorded uncertain
+outcome blocks re-execution until the canonical recovery owner reconciles it.
+Evidence provenance preserves company, actor, context revision, source and child
+session, manager, request, operation, trace, conversation, work/run, correlation,
+idempotency, authority decision/evidence and accepted-evidence identifiers.
+
+The read-only Workforce owner projects a typed
+`titan.directadmin.workforce-receipt.v1` view from that persisted accepted row.
+It requires the authenticated company and initiating actor, matches the request
+summary and stored provenance, and returns `VERIFIED` only when the canonical
+accepted record and independent company-scoped reread/event verifier both say
+verified. It exposes only operation/correlation/work/run IDs, the fixed
+verification method and the receipt evidence reference. Unknown, other-company
+and other-actor receipt IDs resolve as not found; corrupt, uncertain, provider
+acknowledged or unaccepted records cannot become a verified receipt.
+
+The agreed browser read route is `GET
+/v1/directadmin/titan_workforce/receipts/{receipt_id}`, returning
+`{ context, receipt }` after the same current-session/company revalidation as the
+projection route. The `receipt` owner logic is implemented here, but this HTTP
+route and typed `session.receipt('titan_workforce', receipt_id)` method remain
+pending the active #1049 shared-SDK change. They must be tested together before
+claiming the receipt detail endpoint is reachable from DirectAdmin.
+
+The #1049 gateway maps typed owner denials to sanitized status codes and allows
+the `titan_workforce` route. Disposable-store gateway coverage proves denied
+authority does not mutate work, authorized reassignment is observed and stored
+as accepted evidence, and replay after reopening the store returns the same
+receipt without a duplicate event. This source/test evidence does not commission
+the optional host module or DirectAdmin network route.
 
 The old VPS smoke assumes an unconfigured host is ready; this is no longer a valid
 production acceptance claim and must be commissioned by the deployment owner.

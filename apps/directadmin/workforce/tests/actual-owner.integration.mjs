@@ -8,12 +8,12 @@ import { createHash, randomBytes, webcrypto } from 'node:crypto';
 import { createRequire } from 'node:module';
 import http from 'node:http';
 
-const OWNER_HEAD = 'f6710e9d723e47d5dbda035309f9b8cd1de0cf4e';
-const OWNER_TREE_SHA256 = 'a998aa751d059de466b2dcefeb11e2282d19b67e4432e73b890f858da3fd67d1';
-const SDK_HEAD = 'aff115212281fb555d0c7bc804635e88713f2ec5';
-const SDK_BUNDLE_SHA256 = 'f8ac44484b2285293cffe74903053d607414e12d3e6b428045ac42092ec84961';
+const OWNER_HEAD = 'b969acfe6758b26c4ea78c8b3309e8caad9f297d';
+const OWNER_TREE_SHA256 = 'de67bb229fd3300bca95c66867516fadf3025d23aa33d27c02119becdf4551e2';
+const SDK_HEAD = '31e57e11e9f1bbeccf6c527229a4ba018768b9f0';
+const SDK_BUNDLE_SHA256 = 'f1c46346e5ee755c663d22c26a5bb61f8659c366ba3fb15b02723134a15e544e';
 const PACKAGE_SOURCE_HEAD = 'de61ce6362e308cf4eee9d10dabcac1bcae83610';
-const PACKAGE_TREE_SHA256 = '495cf7f58c24428e36d5832d22636d70dac052d5d4136e545a5e9d9d4ad3ea1b';
+const PACKAGE_TREE_SHA256 = 'e5878f9f2489af36aa5346d48bac7ba96777a86a06ce8ea8f3b7e4d684ed25d3';
 const ownerRoot = requiredPath('TITAN_WORKFORCE_OWNER_ROOT');
 const packageRoot = requiredPath('TITAN_WORKFORCE_PACKAGE_ROOT');
 const ownerRequire = createRequire(pathToFileURL(join(ownerRoot, 'packages/titan-platform/package.json')));
@@ -180,7 +180,25 @@ async function makeIdentityBridge(storage, origin) {
     .setIssuedAt(now).setExpirationTime(now + 120).sign(upstream.privateKey);
   const issued = await directadminService.issue(login, { company_id: 'company-a', device_id });
   const bridge = new DirectAdminSessionBridge({ origin, audience: daAudience, node_id, sessions: directadminService });
-  return { registry, bridge, workforceVerifier, csrf, token: issued.credential, actor_id, device_id };
+  const consumedBootstrapNonces = new Set();
+  const bootstrapProvider = Object.freeze({ provide: async proof => {
+    assert.equal(proof.origin, origin);
+    assert.equal(proof.cookie, null, 'the disposable fixture authenticates from the existing Titan session only');
+    assert.equal(proof.authorization, null);
+    assert.equal(typeof proof.csrf_nonce, 'string');
+    assert.equal(consumedBootstrapNonces.has(proof.csrf_nonce), false, 'a bootstrap nonce is consumed once');
+    consumedBootstrapNonces.add(proof.csrf_nonce);
+    const csrf_token = b64(randomBytes(32));
+    const nextCsrfHash = b64(createHash('sha256').update(csrf_token).digest());
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const login_assertion = await new SignJWT({ company_id: 'company-a', device_id,
+      jti: `browser-bootstrap-${proof.csrf_nonce}`, node_id, da_role: 'user', csrf_sha256: nextCsrfHash })
+      .setProtectedHeader({ alg: 'EdDSA', kid: 'upstream-e2e', typ: 'titan-login+jwt' })
+      .setIssuer(provider).setAudience(audience).setSubject('human-1050-e2e')
+      .setIssuedAt(issuedAt).setExpirationTime(issuedAt + 120).sign(upstream.privateKey);
+    return Object.freeze({ login_assertion, company_id: 'company-a', device_id, csrf_token });
+  } });
+  return { registry, bridge, bootstrapProvider, workforceVerifier, csrf, token: issued.credential, actor_id, device_id };
 }
 
 async function makeHarness() {
@@ -272,7 +290,7 @@ async function makeHarness() {
       readiness: async () => ({ authentication: true, authority: true, provider: true, evidence: true }),
       directAdmin: { publicOrigin: 'https://panel.example.test',
         createGateway: owners => {
-          directGateway = SDK.createDirectAdminGateway(auth.bridge, owners);
+          directGateway = SDK.createDirectAdminGateway(auth.bridge, owners, auth.bootstrapProvider);
           return directGateway;
         } },
     } });
@@ -545,7 +563,7 @@ test('actual #1050 consumer and shared SDK traverse #1049 gateway into #1253 SQL
       ['company-a', `titan.workforce.reassign:${operation_id}`])).rowCount, 0);
   });
 
-  await t.test('in-flight post-commit cancellation persists UNCERTAIN state but owner misreports denial', async t => {
+  await t.test('in-flight post-commit cancellation persists UNCERTAIN state and reports an unknown outcome', async t => {
     const operation_id = 'operation-cancel-after-commit';
     const correlation_id = 'correlation-cancel-after-commit';
     const work_id = 'work-cancel-after-commit';
@@ -630,12 +648,12 @@ test('actual #1050 consumer and shared SDK traverse #1049 gateway into #1253 SQL
     assert.equal(evidence?.state, 'UNCERTAIN', 'ExecutionGateway records cancellation as uncertain');
     assert.equal(evidence?.final_outcome, null);
     assert.deepEqual(effect?.evidence_refs, [], 'uncertain execution is not accepted business evidence');
-    assert.equal(response?.status, 403, 'current #1253 owner incorrectly converts UNCERTAIN execution into authority denial');
-    assert.equal(controllerReport?.phase, 'ready');
-    assert.equal(controllerReport?.assignee, 'worker-target');
+    assert.equal(response?.status, 503, 'committed work with an uncertain execution must not be reported as authority denial');
+    assert.equal(controllerReport?.phase, 'unavailable');
+    assert.equal(controllerReport?.assignee, undefined, 'the client clears potentially stale projections after an unknown result');
     assert.equal(controllerReport?.receipt, null);
-    assert.match(controllerReport?.message ?? '', /host denied that request/i,
-      'packaged UI currently tells the operator this committed operation was denied');
+    assert.match(controllerReport?.message ?? '', /outcome is unknown/i,
+      'the UI tells the operator to inspect canonical history before retrying');
     assert.equal(replayError, 503, 'the owner requires recovery and does not execute the same operation twice');
     assert.equal(evidenceCountAfterReplay, evidenceCountBeforeReplay, 'same-operation replay adds no event or evidence');
     assert.equal(eventCountAfterReplay, eventCount, 'same-operation replay emits no second reassignment event');

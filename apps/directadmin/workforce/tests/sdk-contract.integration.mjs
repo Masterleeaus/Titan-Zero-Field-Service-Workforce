@@ -144,6 +144,14 @@ test('canonical SDK/gateway reassign integration consumes child context, CAS, ev
     },
   });
   const fetcher = async (path, init = {}) => {
+    if (new URL(path, 'https://panel.example.test').pathname === '/v1/directadmin/bootstrap') {
+      const headers = new Headers(init.headers);
+      assert.equal(init.method, 'POST');
+      assert.equal(init.body, '');
+      assert.equal(headers.get('x-titan-da-bootstrap-csrf'), bootstrapNonce);
+      return new Response(JSON.stringify({ csrf_token: csrf }), { status: 200,
+        headers: { 'content-type': 'application/json', 'set-cookie': '__Host-titan-da-session=fixture-session; Path=/; Secure; HttpOnly; SameSite=Strict' } });
+    }
     let body = init.body;
     if (tamperNextIntentScope && path.endsWith('/intents')) {
       tamperNextIntentScope = false;
