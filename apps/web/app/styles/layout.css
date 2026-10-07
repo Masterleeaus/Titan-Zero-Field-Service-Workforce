@@ -1776,6 +1776,9 @@ main { max-width: 980px; margin: 0 auto; padding: 24px; }
   .p7-layout-collapsed.p7-field-mode .p7-field-metrics--responsive .p7-field-metric {
     min-height: 68px;
   }
+  .p7-layout-collapsed.p7-field-mode .p7-field-zero-dock {
+    left: calc(var(--sidebar-collapsed-width) + 20px);
+  }
 }
 
 @media (max-width: 767px) {
