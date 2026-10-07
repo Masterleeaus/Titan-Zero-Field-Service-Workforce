@@ -8,6 +8,7 @@ This repository contains separate marketing surfaces with explicit host boundari
 |---|---|---|---|
 | Cleaning product hub | `titanzero.io` | `marketing/nexjob` | Cleaning-first noindex review build; production publication is not authorized by this source change. |
 | Cleaning vertical context | `cleaning.titanzero.io` | Shared `marketing/nexjob` build | Only public vertical host in this launch; DNS, host routing and runtime release remain unverified. |
+| Field marketing review | `field.titanzero.io` (intended) | `marketing/field` (issue #1460) | Separate Field v33 static review build; noindex, access actions routed to status notice; host/DNS/TLS/deployment unverified. |
 | Managed service | `titanzero.io/fully-managed` | Shared Titan Zero marketing source | Retained as an internal page on the `.io` product site. |
 | Cleaning franchise site | `titanzero.pro` | Separate future host/content owner | Planned destination; not rendered by `marketing/nexjob` and not a managed-service site. |
 | Canonical business application | `app.titanzero.io` | `apps/web` and its active owners | One shared application/backend. Marketing account actions remain disabled until the app workflow is confirmed. |
@@ -19,6 +20,7 @@ Hostnames and links in source are planning values, not configured DNS or proof o
 ## Source selection
 
 - `marketing/nexjob` is the shared Titan Zero Cleaning marketing source and host-aware build.
+- `marketing/field` (issue #1460) is a separate static Field marketing review app based on the user-provided v33 source. It does not modify the `.io` cleaning host or Field runtime.
 - The internal catalogue in `marketing/nexjob/src/data/verticalCatalogue.js` retains all 20 profiles. The public host registry exposes Cleaning only for this launch.
 - `marketing/tradepilot` remains a layout donor. Its claims, synthetic metrics, forms, external links and unresolved media are not reused.
 - The legacy Personal Services donor is excluded from the `.io` launch and is not the `.pro` franchise source.

@@ -1,0 +1,11 @@
+{
+  "name": "@titan-zero/field-marketing",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-site.mjs && npm run build && node scripts/check-site.mjs dist",
+    "dev": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs"
+  }
+}
