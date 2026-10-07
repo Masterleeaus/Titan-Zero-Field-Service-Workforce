@@ -25,6 +25,28 @@ An embedding composition root may supply `canonicalAdapter` with these trusted s
 3. `execute(request)` routes the exact retained action/opaque target through the existing Command Bus/ExecutionGateway, registered capability provider and observed verifier. It must revalidate current authority at the actual effect boundary. Raw callbacks named `governedExecutor`/`evidenceSink` no longer activate the ingress.
 4. `recordEvidence(event)` uses the canonical evidence owner and returns a durable accepted receipt/reference. Evidence failure before dispatch prevents execution. Provider acknowledgement remains unverified; only a verified result with a verification reference and accepted result evidence can produce a verified receipt.
 
+### Scoped file API (#1459)
+
+When the host calls `registerTitanFileBridge({ provider, executionGateway })`, passes its returned integration handle as `fileBridge`, and supplies the canonical adapter, Server Node exposes these POST routes:
+
+```text
+/v1/files/roots
+/v1/files/list
+/v1/files/stat
+/v1/files/read
+/v1/files/download
+/v1/files/downloadArchive
+/v1/files/upload
+/v1/files/mkdir
+/v1/files/revoke
+```
+
+Each request uses the canonical bearer credential plus schema, caller, correlation and company context. The canonical adapter resolves actor and session references; request headers do not establish either. Each operation carries a bounded capability input and a current authority-decision reference. Company header/body mismatches, expired decisions, missing canonical actor/session, unavailable domain inventory and revoked access fail closed. File reads call the scoped provider only after canonical authorization and return only after its audit and canonical evidence receipt are accepted. The revoke route requires canonical authorization for `files.bridge.revoke`, writes the company-scoped revocation through the injected revocation owner, and records accepted evidence before it reports success.
+
+Uploads use JSON with `input: { root_id, path, sha256, byte_count }` and a separate `content_base64` field. The authority digest, durable replay reservation and evidence contain only the root/path plus content hash and byte count. The raw upload bytes are passed transiently to `canonicalAdapter.execute()` as `secret_file_content_base64`; they must never be copied into the intent, control metadata, or evidence. The adapter maps this into the existing `ExecutionGateway` provider input as `secret_content_base64`. The file provider checks the declared digest and byte count again before an exclusive create, and its independent verifier observes the created file. Upload cannot replace an existing file. `mkdir` follows the same governed execution, idempotency and verification path.
+
+`DirectAdminDomainInventoryProvider` implements the live estate lookup with the admin-only `CMD_API_DOMAIN?json=yes&action=document_root_all` endpoint. Configure its fixed HTTPS `:2222` panel origin, DirectAdmin owner, company mapping, explicit writable-domain allowlist, and a provider-side credential handle containing a restricted Login Key for this inventory request. The client sends no redirects, bypasses environment proxies, bounds the response and never returns the credential. The plugin CLI still does not instantiate live identity, evidence or revocation providers. Host composition must provide canonical audit/revocation stores and register the file provider with the existing ExecutionGateway. Production API credentials, owner mapping and host results have not been commissioned; fixture inventory tests do not prove the live panel's ownership map.
+
 Intents are restricted to bounded metadata/opaque references, not arbitrary business records or secrets. Company header and body must agree. Invalid UTC timestamps, unavailable capabilities, foreign identity/company, stale authority, changed-payload idempotency reuse and unregistered action kinds fail closed.
 
 ## Persistence, replay and recovery

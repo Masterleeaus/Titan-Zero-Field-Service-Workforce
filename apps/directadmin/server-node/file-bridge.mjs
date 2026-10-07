@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
+import https from "node:https";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 
 export const FILE_ROOT_DOMAIN = "titanzero.io";
+export const FILE_REVOCATION_CAPABILITY = "files.bridge.revoke";
 export const FILE_CAPABILITIES = Object.freeze([
   "files.roots", "files.list", "files.stat", "files.read", "files.download",
   "files.downloadArchive", "files.upload", "files.mkdir",
@@ -31,6 +33,7 @@ const READ = new Set(["files.roots", "files.list", "files.stat", "files.read", "
 const WRITE = new Set(["files.upload", "files.mkdir"]);
 const SECRET = /^(?:\.env(?:\..*)?|\.ssh|\.aws|\.npmrc|\.pypirc|\.htpasswd|\.my\.cnf|\.pgpass|pg_service\.conf|database\.(?:ya?ml|json)|db\.(?:ya?ml|json)|id_(?:rsa|dsa|ecdsa|ed25519)|authorized_keys|known_hosts|wp-config\.php|credentials?(?:\..*)?|secrets?(?:\..*)?|tokens?(?:\..*)?|.*\.(?:key|pem|p12|pfx|jks|keystore)|.*(?:webhook|credential|token|secret|login[_-]?key|directadmin[_-]?(?:key|login)).*)$/i;
 const OMIT_ARCHIVE = new Set([".git", "node_modules", ".cache", "cache", "logs", "log", "dist", "build", ".next", "coverage", "tmp", "temp"]);
+const MAX_DOMAIN_INVENTORY_BYTES = 2 * 1024 * 1024;
 
 export class FileBridgeError extends Error {
   constructor(code, status = 400) { super(code); this.name = "FileBridgeError"; this.code = code; this.status = status; }
@@ -57,6 +60,9 @@ function relativePath(value, allowRoot = false) {
   if (parts.some((part) => !part || part === "." || part === ".." || part.length > 255)) fail("file_path_invalid");
   if (parts.some((part) => SECRET.test(part))) fail("file_secret_denied", 403);
   return parts;
+}
+export function validateTitanFileRelativePath(value, allowRoot = false) {
+  return relativePath(value, allowRoot);
 }
 function mime(name) {
   const ext = path.extname(name).toLowerCase();
@@ -141,6 +147,96 @@ async function regularFile(parent, name, maxBytes, signal) {
     return { bytes, stat, sha256: hash(bytes) };
   } finally { await handle.close(); }
 }
+function requestDirectAdminJson(url, authorization, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const request = https.request(url, { method: "GET", headers: { accept: "application/json", authorization }, agent: false, signal: AbortSignal.timeout(timeoutMs) }, response => {
+      if (response.statusCode !== 200) { response.destroy(); reject(new FileBridgeError("directadmin_domain_inventory_http_error", 503)); return; }
+      const chunks = []; let size = 0;
+      response.on("data", chunk => {
+        size += chunk.length;
+        if (size > MAX_DOMAIN_INVENTORY_BYTES) { response.destroy(new FileBridgeError("directadmin_domain_inventory_too_large", 503)); return; }
+        chunks.push(chunk);
+      });
+      response.on("error", () => reject(new FileBridgeError("directadmin_domain_inventory_unavailable", 503)));
+      response.on("end", () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); }
+        catch { reject(new FileBridgeError("directadmin_domain_inventory_invalid", 503)); }
+      });
+    });
+    request.on("error", () => reject(new FileBridgeError("directadmin_domain_inventory_unavailable", 503)));
+    request.end();
+  });
+}
+
+/**
+ * Read live document roots from DirectAdmin's admin-only legacy domain API.
+ * The API credential is resolved provider-side and never returned to the caller.
+ */
+export class DirectAdminDomainInventoryProvider {
+  constructor({ origin, apiUsername, ownerUser, companyId, credentialProvider, writableDomains = [], requestJson = requestDirectAdminJson, timeoutMs = 5000, now = () => Date.now() } = {}) {
+    let parsed;
+    try { parsed = new URL(origin); } catch { throw new TypeError("directadmin_origin_invalid"); }
+    if (parsed.protocol !== "https:" || parsed.port !== "2222" || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) throw new TypeError("directadmin_origin_must_be_fixed_https_panel_origin");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(apiUsername ?? "") || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(ownerUser ?? "") || !ref(companyId) || typeof credentialProvider?.get !== "function" || typeof requestJson !== "function") throw new TypeError("directadmin_inventory_owner_ports_required");
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 15000) throw new TypeError("directadmin_inventory_timeout_invalid");
+    if (!Array.isArray(writableDomains) || writableDomains.length > 500 || writableDomains.some(domain => !domainName(domain))) throw new TypeError("directadmin_writable_domain_allowlist_invalid");
+    this.origin = parsed.origin;
+    this.apiUsername = apiUsername;
+    this.ownerUser = ownerUser;
+    this.companyId = companyId;
+    this.credentialProvider = credentialProvider;
+    this.writableDomains = new Set(writableDomains);
+    this.requestJson = requestJson;
+    this.timeoutMs = timeoutMs;
+    this.now = now;
+  }
+
+  async listRegisteredDomains({ company_id, root_domain } = {}) {
+    if (company_id !== this.companyId || root_domain !== FILE_ROOT_DOMAIN) fail("file_company_scope_denied", 403);
+    let credential;
+    try { credential = await this.credentialProvider.get({ service: "directadmin", username: this.apiUsername, purpose: "domain-inventory" }); }
+    catch { fail("directadmin_domain_inventory_unavailable", 503); }
+    if (!object(credential) || typeof credential.login_key !== "string" || !credential.login_key || credential.login_key.length > 4096 || /[\r\n]/.test(credential.login_key)) fail("directadmin_domain_inventory_credential_unavailable", 503);
+    const authorization = "Basic " + Buffer.from(`${this.apiUsername}:${credential.login_key}`).toString("base64");
+    const url = new URL("/CMD_API_DOMAIN", this.origin);
+    url.searchParams.set("json", "yes");
+    url.searchParams.set("action", "document_root_all");
+    let payload;
+    try { payload = await this.requestJson(url, authorization, this.timeoutMs); }
+    catch (error) { throw error instanceof FileBridgeError ? error : new FileBridgeError("directadmin_domain_inventory_unavailable", 503); }
+    if (!object(payload?.users) || Object.keys(payload.users).length > 500) fail("directadmin_domain_inventory_invalid", 503);
+    const domains = new Map();
+    const addDomain = (domain, documentRoot) => {
+      const checkedDomain = domainName(domain);
+      if (!checkedDomain || typeof documentRoot !== "string" || !path.isAbsolute(documentRoot) || path.resolve(documentRoot) !== documentRoot) return;
+      domains.set(checkedDomain, {
+        domain: checkedDomain,
+        root_domain: FILE_ROOT_DOMAIN,
+        company_id: this.companyId,
+        registered: true,
+        canonical_document_root: documentRoot,
+        writable: this.writableDomains.has(checkedDomain),
+      });
+      if (domains.size > 500) fail("directadmin_domain_inventory_invalid", 503);
+    };
+    for (const [user, userData] of Object.entries(payload.users)) {
+      if (user !== this.ownerUser || !object(userData?.domains)) continue;
+      if (Object.keys(userData.domains).length > 500) fail("directadmin_domain_inventory_invalid", 503);
+      for (const [domain, domainData] of Object.entries(userData.domains)) {
+        const checkedDomain = domainName(domain);
+        if (!checkedDomain || !object(domainData)) continue;
+        addDomain(checkedDomain, domainData.public_html);
+        if (!object(domainData.subdomains)) continue;
+        for (const [subdomain, subdomainData] of Object.entries(domainData.subdomains)) {
+          if (typeof subdomain !== "string" || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(subdomain) || !object(subdomainData)) continue;
+          addDomain(`${subdomain}.${checkedDomain}`, subdomainData.public_html);
+        }
+      }
+    }
+    return { domains: [...domains.values()].sort((a, b) => a.domain.localeCompare(b.domain)), observed_at: new Date(this.now()).toISOString() };
+  }
+}
+
 function tarEntry(entry) {
   const header = Buffer.alloc(512);
   let name = entry.name, prefix = "";
@@ -179,7 +275,7 @@ export class TitanFileBridgeProvider {
     this.revocationStore = revocationStore;
     this.domainsRoot = path.resolve(domainsRoot);
     this.now = now;
-    this.revoked = false;
+    this.revokedCompanies = new Set();
     this.apps = new Map();
     const knownApps = new Map(APP_ROOTS.map((x) => [x.id, x]));
     for (const mapping of applicationRoots) {
@@ -195,15 +291,15 @@ export class TitanFileBridgeProvider {
   }
 
   async revoke(context) {
-    if (!object(context) || !ref(context.actor_id) || !ref(context.session_ref) || !ref(context.correlation_id)) fail("file_revoke_context_required", 403);
+    if (!object(context) || !ref(context.company_id) || !ref(context.actor_id) || !ref(context.session_ref) || !ref(context.correlation_id)) fail("file_revoke_context_required", 403);
     await this.revocationStore.revoke({ ...context, provider_id: this.id, revoked_at: new Date(this.now()).toISOString() });
-    this.revoked = true;
+    this.revokedCompanies.add(context.company_id);
     await this.auditSink(operationAudit({ ...context, capability: "files.revoke", input: {} }, this.id, "revoked"));
     return { revoked: true };
   }
 
   async enabled(company) {
-    if (this.revoked) fail("file_bridge_revoked", 403);
+    if (this.revokedCompanies.has(company)) fail("file_bridge_revoked", 403);
     let state;
     try { state = await this.revocationStore.isRevoked({ provider_id: this.id, company_id: company }); }
     catch { fail("file_bridge_revocation_unavailable", 503); }
@@ -232,7 +328,12 @@ export class TitanFileBridgeProvider {
       if (!stat?.isDirectory()) continue;
       byDomain.set(domain, { root_id: rootKey("domain", domain, company, canonical), domain, company_id: company, canonical_path: canonical, kind: "domain", application_id: null, writable: item.writable === true, device: stat.dev, inode: stat.ino });
     }
-    if (!byDomain.has(FILE_ROOT_DOMAIN)) fail("file_domain_estate_unavailable", 503);
+    if (!byDomain.has(FILE_ROOT_DOMAIN)) {
+      const ownedElsewhere = inventory.domains.some((item) => item?.domain === FILE_ROOT_DOMAIN
+        && item.root_domain === FILE_ROOT_DOMAIN && item.registered === true && item.company_id !== company);
+      if (ownedElsewhere) fail("file_company_scope_denied", 403);
+      fail("file_domain_estate_unavailable", 503);
+    }
     const roots = [...byDomain.values()];
     for (const mapping of this.apps.values()) {
       const config = this.commissioned.get(mapping.id);
@@ -350,8 +451,8 @@ export class TitanFileBridgeProvider {
         return { root_id: scope.root_id, domain: scope.domain, path: parts.join("/"), canonical_path: path.join(scope.canonical_path, ...parts), entries: entries.slice(0, limit), next_offset: offset + limit < names.length ? offset + limit : null, total_entries: names.length };
       }));
     }
-    const parts = relativePath(input.path, capability === "files.stat");
     if (capability === "files.stat") {
+      const parts = relativePath(input.path ?? "", true);
       if (!parts.length) return { root_id: scope.root_id, domain: scope.domain, path: "", type: "directory", canonical_path: scope.canonical_path };
       return this.withRoot(scope, (root) => withParent(root, parts, async (parent, name) => {
         const entry = await this.entry(parent, name);
@@ -360,6 +461,7 @@ export class TitanFileBridgeProvider {
       }));
     }
     if (capability === "files.read" || capability === "files.download") {
+      const parts = relativePath(input.path, false);
       const max = capability === "files.read" ? FILE_LIMITS.readBytes : FILE_LIMITS.fileBytes;
       return this.withRoot(scope, (root) => withParent(root, parts, async (parent, name) => {
         const file = await regularFile(parent, name, max, signal);
@@ -400,16 +502,28 @@ export class TitanFileBridgeProvider {
   async upload(scope, input, signal) {
     const parts = relativePath(input.path, false);
     const encoded = input.secret_content_base64;
-    if (typeof encoded !== "string" || encoded.length > Math.ceil(FILE_LIMITS.fileBytes / 3) * 4 + 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) fail("file_upload_encoding_invalid", 413);
+    if (typeof encoded !== "string" || encoded.length > Math.ceil(FILE_LIMITS.fileBytes / 3) * 4 || encoded.length % 4 !== 0) fail("file_upload_size_or_encoding_invalid", 413);
+    const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+    if (encoded.length / 4 * 3 - padding > FILE_LIMITS.fileBytes) fail("file_upload_size_or_encoding_invalid", 413);
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) fail("file_upload_encoding_invalid", 400);
     const data = Buffer.from(encoded, "base64");
     if (data.length > FILE_LIMITS.fileBytes || data.toString("base64") !== encoded) fail("file_upload_size_or_encoding_invalid", 413);
+    if (!/^[a-f0-9]{64}$/.test(input.sha256 ?? "") || input.sha256 !== hash(data) || input.byte_count !== data.length) fail("file_upload_authorization_digest_mismatch", 403);
     checkAbort(signal);
     return this.withRoot(scope, (root) => withParent(root, parts, async (parent, name) => {
       let file;
       try { file = await fs.open(childPath(parent, name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | O_NOFOLLOW, 0o640); }
       catch (error) { if (error?.code === "EEXIST") fail("file_exists", 409); throw error; }
-      try { await file.writeFile(data, { signal }); await file.sync(); if ((await file.stat()).size !== data.length) fail("file_upload_incomplete", 503); }
-      finally { await file.close(); }
+      let complete = false;
+      try {
+        await file.writeFile(data, { signal });
+        await file.sync();
+        if ((await file.stat()).size !== data.length) fail("file_upload_incomplete", 503);
+        complete = true;
+      } finally {
+        await file.close();
+        if (!complete) await fs.unlink(childPath(parent, name)).catch(() => {});
+      }
       return { root_id: scope.root_id, domain: scope.domain, path: parts.join("/"), canonical_path: path.join(scope.canonical_path, ...parts), byte_count: data.length, sha256: hash(data), file_ref: "file:" + hash(scope.root_id + parts.join("/")).slice(0, 24), created: true, overwritten: false };
     }));
   }
@@ -468,10 +582,10 @@ export class TitanFileBridgeProvider {
   }
 }
 
-export function registerTitanFileBridge({ provider, executionGateway, registerReadCapability } = {}) {
+export function registerTitanFileBridge({ provider, executionGateway } = {}) {
   if (!(provider instanceof TitanFileBridgeProvider)) throw new TypeError("file-bridge-provider-required");
-  if (typeof executionGateway?.registerProvider !== "function" || typeof registerReadCapability !== "function") throw new TypeError("canonical-file-capability-owners-required");
-  for (const capability of provider.readCapabilities) registerReadCapability(capability, (request) => provider.call({ ...request, capability }));
+  if (typeof executionGateway?.registerProvider !== "function") throw new TypeError("canonical-execution-gateway-required");
   executionGateway.registerProvider(provider);
-  return Object.freeze({ provider_id: provider.id, read_capabilities: provider.readCapabilities, write_capabilities: provider.capabilities, revoke: (context) => provider.revoke(context) });
+  const read = Object.freeze(Object.fromEntries(provider.readCapabilities.map((capability) => [capability, (request) => provider.call({ ...request, capability })])));
+  return Object.freeze({ provider_id: provider.id, provider, read_capabilities: provider.readCapabilities, write_capabilities: provider.capabilities, call: (request) => provider.call(request), read, revoke: (context) => provider.revoke(context), execution_gateway_registered: true });
 }

@@ -4,9 +4,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
+import { FILE_CAPABILITIES, FILE_LIMITS, FILE_REVOCATION_CAPABILITY, validateTitanFileRelativePath } from "./file-bridge.mjs";
 
 export const CONTROL_PLANE_SCHEMA = "titan.server-node/v1";
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_FILE_BODY_BYTES = Math.ceil(FILE_LIMITS.fileBytes / 3) * 4 + MAX_BODY_BYTES;
+const MAX_CONCURRENT_FILE_OPERATIONS = 4;
 const DEFAULT_CAPABILITIES = new Set(["node.health.read", "node.dependencies.read", "node.lifecycle.request", "node.recovery.checkpoint", "node.recovery.restore"]);
 const DEFAULT_DEPENDENCIES = ["web", "workforce", "redis", "database", "directadmin", "evidence_ledger", "backups"];
 const INTENT_KINDS = new Set(["service.start", "service.stop", "service.restart", "application.install", "application.update", "application.rollback", "domain.configure", "credential.rotate", "node.recovery.checkpoint", "node.recovery.restore"]);
@@ -33,9 +36,9 @@ function safeEqual(left, right) {
   const a = Buffer.from(String(left ?? "")); const b = Buffer.from(String(right ?? ""));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
-async function readBody(req) {
+async function readBody(req, maxBytes = MAX_BODY_BYTES) {
   const chunks = []; let size = 0;
-  for await (const chunk of req) { size += chunk.length; if (size > MAX_BODY_BYTES) throw failure("request body too large", 413); chunks.push(chunk); }
+  for await (const chunk of req) { size += chunk.length; if (size > maxBytes) throw failure("request body too large", 413); chunks.push(chunk); }
   let body;
   try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw failure("request body must be valid JSON"); }
   if (!object(body)) throw failure("request body must be an object");
@@ -168,6 +171,13 @@ export function createServerNodeRuntime(options = {}) {
   // Request booleans/references and the old raw executor seam are never authority.
   const adapter = options.canonicalAdapter;
   const commissioned = ["authenticate", "authorize", "execute", "recordEvidence"].every(method => typeof adapter?.[method] === "function");
+  const fileBridge = options.fileBridge;
+  const fileReadCapabilities = new Set(fileBridge?.readCapabilities ?? fileBridge?.read_capabilities ?? []);
+  const fileWriteCapabilities = new Set(fileBridge?.capabilities ?? fileBridge?.write_capabilities ?? []);
+  const fileBridgeAvailable = commissioned && fileBridge?.execution_gateway_registered === true && typeof fileBridge?.call === "function" && typeof fileBridge?.revoke === "function"
+    && FILE_CAPABILITIES.every(capability => capability.startsWith("files.")
+      && (fileReadCapabilities.has(capability) || fileWriteCapabilities.has(capability)));
+  let activeFileOperations = 0;
   let opened = false;
 
   function authenticate(req, requiredCapability, mutation = false) {
@@ -179,7 +189,7 @@ export function createServerNodeRuntime(options = {}) {
     if (!validId(correlation_id)) throw failure("correlation ID required");
     const caller_id = req.headers["x-titan-caller-id"];
     if (!validId(caller_id)) throw failure("caller identity reference required", 403);
-    if (requiredCapability && !capabilities.has(requiredCapability)) throw failure("capability unavailable", 403);
+    if (requiredCapability && !capabilities.has(requiredCapability) && !(fileBridgeAvailable && (FILE_CAPABILITIES.includes(requiredCapability) || requiredCapability === FILE_REVOCATION_CAPABILITY))) throw failure("capability unavailable", 403);
     return { correlation_id, caller_id, ...(mutation ? { credential: auth.slice(7) } : {}) };
   }
   async function health() {
@@ -195,7 +205,13 @@ export function createServerNodeRuntime(options = {}) {
     await store.recordDenial({ reason, company_id: validId(body.company_id) ? body.company_id : "unknown", correlation_id: auth.correlation_id, created_at: new Date().toISOString() });
     throw failure(reason, status);
   }
-  async function authorize(body, auth) {
+  function claimFileOperation() {
+    if (activeFileOperations >= MAX_CONCURRENT_FILE_OPERATIONS) throw failure("file_service_busy", 503);
+    activeFileOperations += 1;
+    let released = false;
+    return () => { if (!released) { released = true; activeFileOperations -= 1; } };
+  }
+  async function authorize(body, auth, { includeCanonicalSession = false } = {}) {
     if (!commissioned) return deny("canonical authority/execution/evidence adapter unavailable", body, auth, 503);
     let principal;
     try { principal = await adapter.authenticate({ bearerToken: auth.credential, caller_ref: auth.caller_id }); }
@@ -205,7 +221,102 @@ export function createServerNodeRuntime(options = {}) {
     let decision;
     try { decision = await adapter.authorize(request); } catch { return deny("canonical authorization unavailable", body, auth, 503); }
     if (decision?.allowed !== true || decision.node_id !== request.node_id || decision.caller_id !== auth.caller_id || decision.company_id !== body.company_id || decision.capability_id !== body.capability_id || decision.intent_digest !== request.intent_digest || decision.authority_decision_ref !== body.authority_decision_ref || !strictDate(decision.expires_at) || Date.parse(decision.expires_at) <= Date.now()) return deny("canonical authority binding refused", body, auth, 403);
-    return { ...request, decision };
+    return {
+      ...request,
+      decision,
+      ...(includeCanonicalSession ? {
+        canonical_actor_id: validId(principal.actor_id) ? principal.actor_id : null,
+        canonical_session_ref: validId(principal.session_ref) ? principal.session_ref : null,
+      } : {}),
+    };
+  }
+  function fileEvidenceResult(capability, result) {
+    return {
+      capability,
+      root_id: typeof result?.root_id === "string" ? result.root_id : null,
+      domain: typeof result?.domain === "string" ? result.domain : null,
+      path: typeof result?.path === "string" ? result.path : null,
+      byte_count: Number.isSafeInteger(result?.byte_count) ? result.byte_count : 0,
+      sha256: validDigest(result?.sha256) ? result.sha256 : null,
+      archive_bytes: Number.isSafeInteger(result?.archive_bytes) ? result.archive_bytes : undefined,
+      entry_count: Number.isSafeInteger(result?.entries) ? result.entries : undefined,
+      root_count: Array.isArray(result?.roots) ? result.roots.length : undefined,
+      created: result?.created === true,
+      overwritten: result?.overwritten === true,
+    };
+  }
+  async function fileOperation(capability, body, auth, req, res, id) {
+    if (!fileBridgeAvailable) throw failure("file bridge unavailable", 503);
+    const writable = fileWriteCapabilities.has(capability);
+    const allowedTopLevel = new Set(["company_id", "capability_id", "authority_decision_ref", "expires_at", "input", ...(writable ? ["idempotency_key"] : []), ...(capability === "files.upload" ? ["content_base64"] : [])]);
+    if (Object.keys(body).some(key => !allowedTopLevel.has(key)) || Object.keys(body).some(key => ["__proto__", "constructor", "prototype"].includes(key))) throw failure("file request fields invalid");
+    if (!object(body.input) || body.capability_id !== capability || !validId(body.company_id) || !validId(body.authority_decision_ref) || !strictDate(body.expires_at)) throw failure("file capability request incomplete");
+    if (body.company_id !== req.headers["x-titan-company-id"]) return deny("company_context_mismatch", body, auth, 403);
+    if (Date.parse(body.expires_at) <= Date.now()) return deny("stale_file_request", body, auth, 409);
+    const inputFields = {
+      "files.roots": [], "files.list": ["root_id", "path", "limit", "offset"], "files.stat": ["root_id", "path"],
+      "files.read": ["root_id", "path"], "files.download": ["root_id", "path"], "files.downloadArchive": ["root_id", "path"],
+      "files.upload": ["root_id", "path", "sha256", "byte_count"], "files.mkdir": ["root_id", "path"],
+    }[capability];
+    if (!inputFields || Object.keys(body.input).some(key => !inputFields.includes(key))) throw failure("file capability input fields invalid");
+    if (capability !== "files.roots" && !validId(body.input.root_id)) throw failure("file root reference required");
+    if (capability !== "files.roots") {
+      if (typeof body.input.path !== "string") throw failure("file relative path required");
+      validateTitanFileRelativePath(body.input.path, ["files.list", "files.stat", "files.downloadArchive"].includes(capability));
+    }
+    if (writable && !validId(body.idempotency_key)) throw failure("file write idempotency key required");
+    if (capability === "files.upload") {
+      if (!validDigest(body.input.sha256) || !Number.isSafeInteger(body.input.byte_count) || body.input.byte_count < 0 || body.input.byte_count > FILE_LIMITS.fileBytes) throw failure("file upload digest and size required");
+      if (typeof body.content_base64 !== "string" || body.content_base64.length > Math.ceil(FILE_LIMITS.fileBytes / 3) * 4) throw failure("file upload content invalid", 413);
+      const encoded = body.content_base64;
+      if (encoded.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw failure("file upload encoding invalid");
+      const bytes = Buffer.from(encoded, "base64");
+      const checksum = crypto.createHash("sha256").update(bytes).digest("hex");
+      if (bytes.length !== body.input.byte_count || checksum !== body.input.sha256 || bytes.toString("base64") !== encoded) throw failure("file upload content does not match authorized digest", 403);
+    }
+    const intentBody = { company_id: body.company_id, capability_id: capability, authority_decision_ref: body.authority_decision_ref, expires_at: body.expires_at, input: structuredClone(body.input), ...(writable ? { idempotency_key: body.idempotency_key } : {}) };
+    const authorized = await authorize(intentBody, auth, { includeCanonicalSession: true });
+    if (!authorized.canonical_actor_id || !authorized.canonical_session_ref) return deny("canonical file actor/session unavailable", body, auth, 503);
+    if (!writable) {
+      const result = await fileBridge.call({ company_id: body.company_id, actor_id: authorized.canonical_actor_id, session_ref: authorized.canonical_session_ref, correlation_id: auth.correlation_id, capability, input: intentBody.input });
+      const evidence = await adapter.recordEvidence({ kind: "server-node.file.read", node_id: store.state.node_id, company_id: body.company_id, actor_id: authorized.canonical_actor_id, correlation_id: auth.correlation_id, evidence_ref: crypto.randomUUID(), intent_digest: authorized.intent_digest, result: fileEvidenceResult(capability, result) });
+      if (evidence?.accepted !== true || !validId(evidence.evidence_ref)) throw failure("canonical file evidence acceptance required", 503);
+      return json(res, 200, { ...result, evidence_ref: evidence.evidence_ref, request_id: id });
+    }
+
+    const receipt = { accepted: true, state: "RESERVED", execution_boundary: "canonical-execution-gateway", provider_acknowledged: false, verified: false, correlation_id: auth.correlation_id };
+    const record = { idempotency_key: body.idempotency_key, company_id: body.company_id, capability_id: capability, correlation_id: auth.correlation_id, evidence_ref: crypto.randomUUID(), fingerprint: authorized.intent_digest, intent: structuredClone(intentBody), state: "RESERVED", created_at: new Date().toISOString(), receipt };
+    const reservation = await store.reserveIntent(record);
+    if (!reservation.created) {
+      const prior = reservation.record;
+      if (prior.company_id !== body.company_id || prior.capability_id !== capability || prior.fingerprint !== record.fingerprint || !object(prior.receipt) || !object(prior.intent)) throw failure("file idempotency key reused for a different request", 409);
+      return json(res, 200, { ...prior.receipt, replay: true, request_id: id });
+    }
+    let mayHaveExecuted = false;
+    try {
+      const reserved = await adapter.recordEvidence({ kind: "server-node.file.requested", node_id: store.state.node_id, company_id: body.company_id, actor_id: authorized.canonical_actor_id, correlation_id: auth.correlation_id, evidence_ref: record.evidence_ref, intent_digest: record.fingerprint, authority_decision_ref: body.authority_decision_ref, result: fileEvidenceResult(capability, intentBody.input) });
+      if (reserved?.accepted !== true || !validId(reserved.evidence_ref)) throw new Error("canonical file request evidence acceptance required");
+      record.state = "EXECUTING"; record.receipt = { ...receipt, state: "EXECUTING" }; await store.recordIntent(record);
+      if (Date.parse(body.expires_at) <= Date.now()) throw failure("stale file request at dispatch", 409);
+      const current = await authorize(intentBody, auth, { includeCanonicalSession: true });
+      if (current.canonical_actor_id !== authorized.canonical_actor_id || current.canonical_session_ref !== authorized.canonical_session_ref) throw failure("canonical file session changed before dispatch", 403);
+      mayHaveExecuted = true;
+      const result = await adapter.execute({ ...current, ...(capability === "files.upload" ? { secret_file_content_base64: body.content_base64 } : {}) });
+      const summary = fileEvidenceResult(capability, result?.result ?? result?.evidence?.observed_result ?? result);
+      const finalEvidence = await adapter.recordEvidence({ kind: "server-node.file.result", node_id: store.state.node_id, company_id: body.company_id, actor_id: authorized.canonical_actor_id, correlation_id: auth.correlation_id, evidence_ref: record.evidence_ref, intent_digest: record.fingerprint, result: { ...summary, state: result?.state ?? "UNCERTAIN", verified: result?.verified === true, verification_ref: validId(result?.verification_ref) ? result.verification_ref : null } });
+      if (finalEvidence?.accepted !== true || !validId(finalEvidence.evidence_ref)) throw new Error("canonical file result evidence acceptance required");
+      const verified = result?.state === "VERIFIED" && result?.verified === true && validId(result.verification_ref);
+      record.state = verified ? "VERIFIED" : result?.state === "DENIED" ? "DENIED" : result?.provider_acknowledged === true ? "PROVIDER_ACKNOWLEDGED" : "UNCERTAIN";
+      record.receipt = { ...receipt, state: record.state, provider_acknowledged: result?.provider_acknowledged === true, verified, ...(verified ? { verification_ref: result.verification_ref } : {}), evidence_ref: finalEvidence.evidence_ref, reconciliation_required: record.state === "UNCERTAIN" };
+      await store.recordIntent(record);
+      if (!verified) return json(res, 503, { ...record.receipt, error: "file outcome not independently verified", request_id: id });
+      return json(res, 200, { ...record.receipt, file: summary, request_id: id });
+    } catch {
+      record.state = mayHaveExecuted ? "UNCERTAIN" : "BLOCKED";
+      record.receipt = { ...receipt, state: record.state, verified: false, reconciliation_required: true };
+      try { await store.recordIntent(record); } catch { /* the reservation still blocks automatic replay */ }
+      return json(res, 503, { ...record.receipt, error: "canonical file reconciliation required", request_id: id });
+    }
   }
   async function submit(body, auth, req, res, id) {
     const required = ["kind", "target_ref", "company_id", "capability_id", "idempotency_key", "governed_execution_ref", "authority_decision_ref", "evidence_ref"];
@@ -269,7 +380,36 @@ export function createServerNodeRuntime(options = {}) {
         return json(res, 200, { schema: CONTROL_PLANE_SCHEMA, node_id: store.state.node_id, ...result, ...(url.pathname === "/v1/dependencies" ? { graph: result.dependencies.map(item => ({ ...item, depends_on: item.depends_on ?? [] })) } : {}), correlation_id: auth.correlation_id });
       }
       if (req.method === "GET" && url.pathname === "/v1/bootstrap") {
-        const auth = authenticate(req); return json(res, 200, { schema: CONTROL_PLANE_SCHEMA, node_id: store.state.node_id, capabilities: [...capabilities].filter(capability => commissioned || capability.endsWith(".read")), canonical_execution: commissioned ? "configured" : "unavailable", control_metadata_only: true, company_data_owner: "company-physical-store", evidence_owner: "evidence-ledger", correlation_id: auth.correlation_id });
+        const auth = authenticate(req); return json(res, 200, { schema: CONTROL_PLANE_SCHEMA, node_id: store.state.node_id, capabilities: [...new Set([...capabilities, ...(fileBridgeAvailable ? [...FILE_CAPABILITIES, FILE_REVOCATION_CAPABILITY] : [])])].filter(capability => commissioned || capability.endsWith(".read")), canonical_execution: commissioned ? "configured" : "unavailable", file_bridge: fileBridgeAvailable ? "configured" : "unavailable", control_metadata_only: true, company_data_owner: "company-physical-store", evidence_owner: "evidence-ledger", correlation_id: auth.correlation_id });
+      }
+      if (url.pathname === "/v1/files/revoke") {
+        if (req.method !== "POST") throw failure("method not allowed", 405);
+        const auth = authenticate(req, FILE_REVOCATION_CAPABILITY, true);
+        if (!fileBridgeAvailable) throw failure("file bridge unavailable", 503);
+        const release = claimFileOperation();
+        try {
+          const body = await readBody(req);
+          if (Object.keys(body).some(key => !["company_id", "capability_id", "authority_decision_ref", "expires_at"].includes(key)) || body.capability_id !== FILE_REVOCATION_CAPABILITY || !validId(body.company_id) || !validId(body.authority_decision_ref) || !strictDate(body.expires_at)) throw failure("file revocation request incomplete");
+          if (body.company_id !== req.headers["x-titan-company-id"]) return deny("company_context_mismatch", body, auth, 403);
+          if (Date.parse(body.expires_at) <= Date.now()) return deny("stale_file_revocation", body, auth, 409);
+          const intent = { ...body, input: { provider_id: fileBridge.provider_id } };
+          const authorized = await authorize(intent, auth, { includeCanonicalSession: true });
+          if (!authorized.canonical_actor_id || !authorized.canonical_session_ref) return deny("canonical file actor/session unavailable", body, auth, 503);
+          const result = await fileBridge.revoke({ company_id: body.company_id, actor_id: authorized.canonical_actor_id, session_ref: authorized.canonical_session_ref, correlation_id: auth.correlation_id });
+          const evidence = await adapter.recordEvidence({ kind: "server-node.file.revoked", node_id: store.state.node_id, company_id: body.company_id, actor_id: authorized.canonical_actor_id, correlation_id: auth.correlation_id, evidence_ref: crypto.randomUUID(), intent_digest: authorized.intent_digest, result: { provider_id: fileBridge.provider_id, revoked: result?.revoked === true } });
+          if (evidence?.accepted !== true || !validId(evidence.evidence_ref)) throw failure("canonical file revocation evidence acceptance required", 503);
+          return json(res, 200, { revoked: result.revoked === true, evidence_ref: evidence.evidence_ref, request_id: id });
+        } finally { release(); }
+      }
+      const fileRoute = /^\/v1\/files\/([A-Za-z]+)$/.exec(url.pathname);
+      if (fileRoute) {
+        if (req.method !== "POST") throw failure("method not allowed", 405);
+        const capability = "files." + fileRoute[1];
+        if (!FILE_CAPABILITIES.includes(capability)) throw failure("file capability not found", 404);
+        const auth = authenticate(req, capability, true);
+        const release = claimFileOperation();
+        try { return await fileOperation(capability, await readBody(req, capability === "files.upload" ? MAX_FILE_BODY_BYTES : MAX_BODY_BYTES), auth, req, res, id); }
+        finally { release(); }
       }
       if (req.method === "POST" && url.pathname === "/v1/intents") {
         const auth = authenticate(req, "node.lifecycle.request", true); return await submit(await readBody(req), auth, req, res, id);
