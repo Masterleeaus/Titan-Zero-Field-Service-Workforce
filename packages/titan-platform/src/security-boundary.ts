@@ -67,13 +67,15 @@ export function createSecureEnvelope(binding: SessionBinding, company_id: string
   return Object.freeze({ company_id, session_id: binding.session_id, actor_id: binding.actor_id, role: "user", payload: redactSecrets(payload) as Record<string, unknown> });
 }
 
-export { createIdentitySessionRegistry, initializeDirectAdminBootstrapNonceStore, IdentitySessionRegistry } from './security-session-registry.js';
+export { createIdentitySessionRegistry, openIdentitySessionRegistry, initializeDirectAdminBootstrapNonceStore, IdentitySessionRegistry } from './security-session-registry.js';
 export type { VerifiedSessionIdentity, SessionSourceReference, ExpectedSessionContext, CurrentSessionContext, IssueSessionInput,
   DirectAdminBootstrapNonceIssue, DirectAdminBootstrapNonceIdentityIssue, DirectAdminBootstrapNonceIssued,
-  DirectAdminBootstrapNonceIssuedSelection, DirectAdminBootstrapNonceConsume, DirectAdminBootstrapNonceSelection } from './security-session-registry.js';
+  DirectAdminBootstrapNonceIssuedSelection, DirectAdminBootstrapNonceConsume, DirectAdminBootstrapNonceSelection,
+  CurrentCompanyMembership, IdentityStatus } from './security-session-registry.js';
 export { createSessionCredentialService, createSessionCredentialVerifier, directAdminIssuer, parseDirectAdminSessionInfo,
   projectDirectAdminSessionIdentity, createDirectAdminBootstrapAssertionProvider } from './security-session-credentials.js';
 export type { CredentialExpectation, SessionCredentialOptions, IssuedSessionCredential, AuthenticatedSessionCredential,
+  MembershipMutation,
   DirectAdminAssertionTrust, DirectAdminCredentialBinding, DirectAdminSessionRole, DirectAdminSessionInfo,
   DirectAdminExternalSessionIdentity, DirectAdminBootstrapProofEnvelope, DirectAdminBootstrapContextRequest,
   DirectAdminBootstrapSelection, DirectAdminBootstrapNonceConsumer, DirectAdminLoginAssertionInput,

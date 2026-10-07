@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { requireSecurityId, requireSecurityRevision, securityTimestamp } from './security-boundary.js';
 import { isIdentityRegistryUnavailableError, type CurrentSessionContext, type IdentitySessionRegistry,
-  type SessionSourceReference, type VerifiedSessionIdentity } from './security-session-registry.js';
+  type IdentityStatus, type SessionSourceReference, type VerifiedSessionIdentity } from './security-session-registry.js';
 
 type Algorithm = 'ES256' | 'RS256' | 'HS256' | 'EdDSA';
 type Key = CryptoKey | Uint8Array;
@@ -11,6 +11,9 @@ export type DirectAdminAssertionTrust = Readonly<{
 type Trust = DirectAdminAssertionTrust;
 export type CredentialExpectation = Readonly<{
   company_id: string; device_id: string; actor_id?: string; context_revision?: string;
+}>;
+export type MembershipMutation = Readonly<{
+  actor_id: string; company_id: string; role: string; status: IdentityStatus;
 }>;
 export type DirectAdminSessionRole = 'admin' | 'reseller' | 'user';
 /** Documented identity sub-schema of DirectAdmin GET /api/session. */
@@ -665,6 +668,19 @@ export function createSessionCredentialService(options: SessionCredentialOptions
         await ensureSigning(at);
         const current = await registry.switchCompany(proof, checked, companyId, at.toISOString());
         return signed(current, proof.subject, at, binding);
+      });
+    },
+    putMembershipAsCurrentOwner(
+      credential: string,
+      expectation: CredentialExpectation,
+      membership: MembershipMutation,
+      expectedRevision: number,
+    ) {
+      return deny(async () => {
+        expected(expectation);
+        const at = now();
+        const { proof, checked } = await authenticated(credential, expectation, at);
+        return registry.putMembershipAsCurrentOwner(proof, checked, membership, expectedRevision, at.toISOString());
       });
     },
     exchangeWorkforceZero(credential: string, expectation?: CredentialExpectation): Promise<IssuedSessionCredential> {

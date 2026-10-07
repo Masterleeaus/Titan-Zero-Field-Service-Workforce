@@ -1,16 +1,39 @@
-# Selected-company session enforcement (#302 slice)
+# Historical selected-company membership session slice
 
-## Current contract
+This page records the 2026-10-01 legacy membership-lookup slice and its original
+verification. Its implementation description and verification inventory below
+are historical; they are **not** the current web authentication contract. The
+current contract is [authenticated session credentials](../contracts/authenticated-session-credentials.md),
+backed by the [canonical identity/session registry](../contracts/current-identity-session-registry.md).
 
-`apps/web/lib/auth/session.ts` verifies the signed `fsm_session` cookie, validates its opaque user/company compatibility IDs and role, then re-reads the current identity context on every request. Tokens issued by `createSession` have HS256, issued-at and expiry claims; verification requires those claims and that algorithm. A JWT role is never a substitute for the current stored role.
+## Current web authentication contract (2026-10-03)
 
-- PostgreSQL/MySQL compatibility lookup requires an **active** `business_memberships` row for the exact token user and selected account. There is no fallback to `users.account_id` or `users.role`.
-- Revoked, suspended, invited, missing or deleted memberships deny access, including a removed last/default membership. The returned user/account must exactly match the token context.
-- SQLite preserves its existing explicit `users.company_id AS account_id` mapping with user and company predicates. This schema has no membership-status model; it does not acquire one in this patch.
-- `SessionPayload.accountId` remains a compatibility field. This patch does not establish a new global principal schema, canonical company mapping or physical storage resolver.
-- Identity and company context do not grant consequential business execution authority. Existing governed execution checks remain required.
+`apps/web/lib/auth/session.ts` accepts only the `__Host-titan-web-session`
+credential produced by the configuration-gated web runtime. Login verifies the
+password first, then exchanges a server-created one-time assertion through the
+canonical `GLOBAL_REGISTRY` credential owner. Each request verifies the pinned
+issuer, audience, algorithm, key, expiry and signature before current actor,
+company, membership, device and generation are resolved. Role comes from current
+registry state. Legacy `fsm_session` cookies are not credentials and are never a
+fallback.
 
-## Compatibility and deployment hold
+PostgreSQL's pre-auth login lookup uses migration 178's
+`app_login_candidates($1)` function. After authentication, the web runtime uses
+only the canonical registry and does not query `business_memberships` before
+establishing PostgreSQL context. Company switching requires the current verified
+credential and an explicit destination mapping for the same signed subject;
+failed preflight does not mutate the current session. Operation scope is always
+the selected `[company_id]`, not the switch-choice list.
+
+Logout revokes the current durable session before clearing its cookie. The
+`__Host-` cookie is expired with `Secure; HttpOnly; SameSite=Lax; Path=/` and no
+`Domain`. Missing configuration or registry availability fails closed. Runtime
+code creates no registry schema, user, identity, membership, key, or mapping; no
+historical membership is backfilled. Provisioning and protected routes require
+the verified current session and registry-derived role. Identity alone still
+does not grant consequential business authority.
+
+## Historical compatibility and deployment hold
 
 Migration `db/migrations/179_business_memberships.sql` creates unique `(account_id,user_id)` memberships, backfills existing users as active and uses `ON CONFLICT ... DO NOTHING`. The MySQL compatibility migration `db/mysql/002_auth_clients_portable.sql` also backfills memberships with `INSERT IGNORE`. Neither migration should be rerun as a recovery mechanism: doing so could reconstruct intentionally deleted memberships.
 
@@ -18,9 +41,12 @@ The existing PostgreSQL-only `POST /api/v1/users` route previously created only 
 
 Existing legitimate PostgreSQL/MySQL users created after backfill without a membership will be denied by this change. They cannot safely be distinguished from users whose last membership was deliberately deleted. **Independent review and an explicit deployment recovery decision are required before merge/promotion.** Determine intended memberships from authoritative administrative evidence; do not broadly recreate missing memberships from `users.account_id`. This patch performs no backfill, migration or production data edit.
 
-Rollback is a source revert, but reverting the session join restores the context-fallback defect. Do not use fallback as a silent compatibility escape hatch.
+Those observations describe the historical membership-slice rollout. They do
+not authorize recreating memberships or reverting the current credential
+boundary as a compatibility fallback. Any data/access decision must use
+authoritative evidence and remain with the identity owner.
 
-## Verification boundary
+## Historical verification boundary
 
 The dedicated tests cover signed JWT verification, company A/B roles, missing/inactive/deleted memberships, revoked default membership, deleted principals, changed stored roles, malformed/expired/tampered tokens, SQLite match/mismatch and company reassignment, a real protected clients route, and PostgreSQL creation -> real login -> real session plus rollback, role downgrade with an old cookie, inactive-status preservation, wrong-company denial and unchanged unrelated memberships.
 
@@ -28,7 +54,7 @@ The SQL adapter in these tests executes production lookup statements against in-
 
 A replayed cookie is denied after its selected membership is revoked/deleted, or (SQLite) the user company mapping changes. Merely switching the browser cookie from still-valid company A to still-valid company B does not invalidate a previously issued A cookie: this legacy session contract has no server-side session generation/revocation record. Global switch invalidation, logout/password-reset invalidation, replay/device lifecycle, identity-control-plane migration, physical storage isolation and supply-chain/credential controls remain open under #302 and their canonical owners. No deployed exploit or complete security mission is claimed.
 
-## Local evidence (2026-10-01; base b9b2d86)
+## Historical local evidence (2026-10-01; base b9b2d86)
 
 Pinned pnpm 9.12.0, Node 24.19.0. Main frozen dependency installation is blocked by existing manifest/lock drift; dependencies were installed with `pnpm install --no-frozen-lockfile --store-dir .auth-cache/store`, then the lockfile was restored. No dependency/lockfile change belongs to this slice.
 
@@ -43,7 +69,7 @@ Pinned pnpm 9.12.0, Node 24.19.0. Main frozen dependency installation is blocked
 - `pnpm --filter @titan-zero/web test:integration`: **1 passed, 126 skipped** without TEST_BASE_URL/TEST_DATABASE_URL. Auth HTTP, DB/RLS and recovery suites did not execute. No Docker/PostgreSQL/MySQL server is installed here.
 - `git diff --check`: passed. Main advanced repository-governance files during this work; refreshed onto b4113e0 and reran focused tests/lint/web tests/typecheck. A subsequent portfolio-document-only change advanced main to b9b2d86; incorporated without conflicts and reran focused tests.
 
-### Existing web failure inventory
+### Broad-suite failure inventory recorded at that time
 
 The full suite reports these files (106 failed tests plus 3 failed-suite collection entries); these are preserved as failing evidence, not waived:
 
