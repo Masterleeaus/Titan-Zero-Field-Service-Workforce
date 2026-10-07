@@ -39,6 +39,7 @@ import {
 } from "./attention/AttentionBell";
 import {
   getFieldWorkspace,
+  getFieldWorkspaceActiveTab,
   getFieldWorkspaceTabs,
   type FieldMetric,
   type FieldWorkspace,
@@ -258,6 +259,9 @@ export function AppShell({ role, userName, reviewPending, fieldMetrics = [], chi
   const sections = fieldMode ? [{ label: "", items: getFieldNavItems(role) }] : legacySections;
   const bottomItems = getBottomNavItems(role, fieldMode);
   const fieldTabs = fieldWorkspace ? getFieldWorkspaceTabs(fieldWorkspace) : [];
+  const activeFieldTab = fieldWorkspace
+    ? getFieldWorkspaceActiveTab(fieldWorkspace, pathname, searchParams.get("tab"))
+    : null;
   const [showQuickLead, setShowQuickLead] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -572,11 +576,7 @@ export function AppShell({ role, userName, reviewPending, fieldMetrics = [], chi
           {fieldMode && fieldTabs.length > 0 && (
             <nav className="p7-field-tabs" aria-label={`${fieldWorkspace} workspace`}>
               {fieldTabs.map((tab) => {
-                const href = tab.href.split("?")[0];
-                const tabValue = new URLSearchParams(tab.href.split("?")[1] ?? "").get("tab");
-                const active = tabValue
-                  ? pathname === href && (searchParams.get("tab") ?? "messages") === tabValue
-                  : pathname === href || pathname.startsWith(`${href}/`);
+                const active = activeFieldTab === tab.href;
                 return (
                   <Link
                     key={tab.href}
