@@ -5,7 +5,7 @@
 validate_server_node_package() {
   local source="$1" package_kind="${2:-plugin}" file
   case "$package_kind" in plugin|runtime) ;; *) echo 'invalid Server Node package validation mode' >&2; return 1 ;; esac
-  for file in plugin.conf runtime.mjs directadmin-relay.mjs package.json health.sh titan-server-node.service; do
+  for file in plugin.conf runtime.mjs directadmin-relay.mjs file-bridge.mjs package.json health.sh titan-server-node.service; do
     if [ ! -f "$source/$file" ] || [ -L "$source/$file" ]; then
       echo "package input must be a regular file: $file" >&2; return 1
     fi
@@ -22,6 +22,7 @@ validate_server_node_package() {
   node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)' || { echo 'Node.js 20+ is required' >&2; return 1; }
   node --check "$source/runtime.mjs" || return 1
   node --check "$source/directadmin-relay.mjs" || return 1
+  node --check "$source/file-bridge.mjs" || return 1
   if [ "$package_kind" = plugin ]; then node --check "$source/images/directadmin-relay-client.mjs" || return 1; fi
   bash -n "$source/health.sh" || return 1
   if [ "$package_kind" = plugin ]; then
@@ -206,7 +207,7 @@ update_server_node() (
   trap cleanup_update_staging EXIT
   stage="$(mktemp -d "${installed}.stage.XXXXXX")"
   chmod 0755 "$stage"
-  for file in runtime.mjs directadmin-relay.mjs package.json plugin.conf; do install -m 0644 "$source/$file" "$stage/$file"; done
+  for file in runtime.mjs directadmin-relay.mjs file-bridge.mjs package.json plugin.conf; do install -m 0644 "$source/$file" "$stage/$file"; done
   install -m 0755 "$source/health.sh" "$stage/health.sh"
   install -m 0644 "$source/titan-server-node.service" "$stage/titan-server-node.service"
   validate_server_node_package "$stage" runtime
@@ -218,8 +219,9 @@ update_server_node() (
   cp -p "$unit" "$backup/titan-server-node.service"
   backup_hash_files=(runtime/runtime.mjs runtime/package.json titan-server-node.service)
   if [ -f "$backup/runtime/directadmin-relay.mjs" ]; then backup_hash_files+=(runtime/directadmin-relay.mjs); fi
+  if [ -f "$backup/runtime/file-bridge.mjs" ]; then backup_hash_files+=(runtime/file-bridge.mjs); fi
   (cd "$backup"; sha256sum "${backup_hash_files[@]}" > SHA256SUMS)
-  (cd "$stage"; sha256sum runtime.mjs directadmin-relay.mjs package.json plugin.conf health.sh titan-server-node.service > SHA256SUMS)
+  (cd "$stage"; sha256sum runtime.mjs directadmin-relay.mjs file-bridge.mjs package.json plugin.conf health.sh titan-server-node.service > SHA256SUMS)
 
   rollback_update() {
     local original_status="$1" restored=true

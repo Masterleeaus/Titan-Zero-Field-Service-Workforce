@@ -68,7 +68,7 @@ server_node_install_runtime_matches() {
   current_manifest="$(cat "$installed/SHA256SUMS")" || return 1
   [ "$current_manifest" = "$expected_manifest" ] || return 1
   (cd "$installed" && sha256sum --check --status SHA256SUMS) || return 1
-  expected_names=$'SHA256SUMS\ndirectadmin-relay.mjs\nhealth.sh\npackage.json\nplugin.conf\nruntime.mjs\ntitan-server-node.service'
+  expected_names=$'SHA256SUMS\ndirectadmin-relay.mjs\nfile-bridge.mjs\nhealth.sh\npackage.json\nplugin.conf\nruntime.mjs\ntitan-server-node.service'
   current_names="$(find "$installed" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   [ "$current_names" = "$expected_names" ]
 }
@@ -192,12 +192,12 @@ install_server_node() (
 
   runtime_stage="$(mktemp -d "${installed}.stage.XXXXXX")"
   chmod 0755 "$runtime_stage"
-  for file in runtime.mjs directadmin-relay.mjs package.json plugin.conf; do
+  for file in runtime.mjs directadmin-relay.mjs file-bridge.mjs package.json plugin.conf; do
     install -m 0644 "$source/$file" "$runtime_stage/$file"
   done
   install -m 0755 "$source/health.sh" "$runtime_stage/health.sh"
   install -m 0644 "$source/titan-server-node.service" "$runtime_stage/titan-server-node.service"
-  (cd "$runtime_stage" && sha256sum runtime.mjs directadmin-relay.mjs package.json plugin.conf health.sh titan-server-node.service > SHA256SUMS)
+  (cd "$runtime_stage" && sha256sum runtime.mjs directadmin-relay.mjs file-bridge.mjs package.json plugin.conf health.sh titan-server-node.service > SHA256SUMS)
   chmod 0644 "$runtime_stage/SHA256SUMS"
   expected_manifest="$(cat "$runtime_stage/SHA256SUMS")"
   validate_server_node_package "$runtime_stage" runtime

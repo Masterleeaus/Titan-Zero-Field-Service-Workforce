@@ -158,15 +158,17 @@ async function fixture(t, behavior = "healthy") {
   const port = await unusedPort();
   for (const target of [source, installed, path.dirname(unit), path.dirname(config), path.dirname(store)]) fs.mkdirSync(target, { recursive: true });
   const runtime = (version, good) => `import http from "node:http";
+${version === "new" ? 'import { FILE_ROOT_DOMAIN } from "./file-bridge.mjs";' : ""}
 const version = ${JSON.stringify(version)};
-const server = http.createServer((req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ ok: ${good}, service: "titan-server-node", pid: process.pid + ${version === "new" && behavior === "wrong-pid" ? 1 : 0}, version })); });
+const fileRoot = ${version === "new" ? "FILE_ROOT_DOMAIN" : "null"};
+const server = http.createServer((req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ ok: ${good}, service: "titan-server-node", pid: process.pid + ${version === "new" && behavior === "wrong-pid" ? 1 : 0}, version, fileRoot })); });
 server.listen(Number(process.env.TITAN_NODE_PORT), "127.0.0.1");
 process.once("SIGTERM", () => server.close(() => process.exit(0)));
 `;
   const oldRuntime = runtime("old", true);
   const newRuntime = runtime("new", !["unready", "rollback-stop-fails"].includes(behavior));
   const packageFiles = [
-    "plugin.conf", "package.json", "health.sh", "titan-server-node.service", "directadmin-relay.mjs",
+    "plugin.conf", "package.json", "health.sh", "titan-server-node.service", "directadmin-relay.mjs", "file-bridge.mjs",
     "scripts/install.sh", "scripts/update.sh", "scripts/uninstall.sh",
     "user/index.html", "user/directadmin-gateway.raw", "images/directadmin-relay-client.mjs",
   ];
@@ -179,8 +181,10 @@ process.once("SIGTERM", () => server.close(() => process.exit(0)));
   fs.writeFileSync(path.join(source, "runtime.mjs"), newRuntime);
   const oldRelay = "export const relayRelease = 'previous';\n";
   const newRelay = fs.readFileSync(path.join(root, "directadmin-relay.mjs"), "utf8");
+  const newFileBridge = fs.readFileSync(path.join(root, "file-bridge.mjs"), "utf8");
   fs.writeFileSync(path.join(installed, "runtime.mjs"), oldRuntime);
   fs.writeFileSync(path.join(installed, "directadmin-relay.mjs"), oldRelay);
+  // Pre-bridge installations did not contain this imported runtime module.
   fs.writeFileSync(path.join(installed, "package.json"), '{"type":"module","name":"previous"}\n');
   fs.writeFileSync(path.join(installed, "prior-only.txt"), "keep in rollback artifact\n");
   fs.writeFileSync(unit, "previous service unit\n");
@@ -230,7 +234,7 @@ throw new Error("unexpected systemctl command: " + command);
     try { process.kill(Number(fs.readFileSync(pidFile, "utf8")), "SIGTERM"); } catch {}
     fs.rmSync(dir, { recursive: true, force: true });
   });
-  return { dir, source, installed, unit, backups, store, config, log, oldRuntime, newRuntime, oldRelay, newRelay, port,
+  return { dir, source, installed, unit, backups, store, config, log, oldRuntime, newRuntime, oldRelay, newRelay, newFileBridge, port,
     startInstalledRuntime: async () => {
       const child = spawn(process.execPath, [path.join(installed, "runtime.mjs")], {
         detached: true,
@@ -262,6 +266,7 @@ test("update promotes staged runtime and unit and retains the previous artifact"
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(path.join(f.installed, "runtime.mjs"), "utf8"), f.newRuntime);
   assert.equal(fs.readFileSync(path.join(f.installed, "directadmin-relay.mjs"), "utf8"), f.newRelay);
+  assert.equal(fs.readFileSync(path.join(f.installed, "file-bridge.mjs"), "utf8"), f.newFileBridge);
   assert.equal(fs.readFileSync(f.unit, "utf8"), fs.readFileSync(path.join(f.source, "titan-server-node.service"), "utf8"));
   assert.equal(fs.existsSync(path.join(f.installed, "prior-only.txt")), false);
   const report = JSON.parse(result.stdout);
@@ -269,8 +274,11 @@ test("update promotes staged runtime and unit and retains the previous artifact"
   assert.equal(report.status, "live");
   assert.equal(fs.readFileSync(path.join(report.rollback_artifact, "runtime/runtime.mjs"), "utf8"), f.oldRuntime);
   assert.equal(fs.readFileSync(path.join(report.rollback_artifact, "runtime/directadmin-relay.mjs"), "utf8"), f.oldRelay);
+  assert.equal(fs.existsSync(path.join(report.rollback_artifact, "runtime/file-bridge.mjs")), false);
   assert.equal(fs.readFileSync(path.join(report.rollback_artifact, "titan-server-node.service"), "utf8"), "previous service unit\n");
-  assert.equal((await (await fetch(`http://127.0.0.1:${f.port}/live`)).json()).version, "new");
+  const live = await (await fetch(`http://127.0.0.1:${f.port}/live`)).json();
+  assert.equal(live.version, "new");
+  assert.equal(live.fileRoot, "titanzero.io");
   assert.equal(fs.readFileSync(f.store, "utf8"), '{"fixture":"durable control metadata"}\n');
 });
 
@@ -282,6 +290,7 @@ for (const behavior of ["restart-fails", "unready", "wrong-pid"]) {
     assert.notEqual(result.status, 0);
     assert.equal(fs.readFileSync(path.join(f.installed, "runtime.mjs"), "utf8"), f.oldRuntime);
     assert.equal(fs.readFileSync(path.join(f.installed, "directadmin-relay.mjs"), "utf8"), f.oldRelay);
+    assert.equal(fs.existsSync(path.join(f.installed, "file-bridge.mjs")), false);
     assert.equal(fs.readFileSync(f.unit, "utf8"), "previous service unit\n");
     assert.equal(fs.statSync(f.unit).mode & 0o777, 0o600);
     assert.equal(fs.readFileSync(path.join(f.installed, "prior-only.txt"), "utf8"), "keep in rollback artifact\n");
@@ -300,6 +309,7 @@ test("invalid staged runtime leaves the installation untouched and never restart
   assert.notEqual(result.status, 0);
   assert.equal(fs.readFileSync(path.join(f.installed, "runtime.mjs"), "utf8"), f.oldRuntime);
   assert.equal(fs.readFileSync(path.join(f.installed, "directadmin-relay.mjs"), "utf8"), f.oldRelay);
+  assert.equal(fs.existsSync(path.join(f.installed, "file-bridge.mjs")), false);
   assert.equal(fs.readFileSync(f.unit, "utf8"), "previous service unit\n");
   assert.equal(fs.existsSync(f.log), false);
   assert.match(result.stderr, /SyntaxError/);
@@ -313,6 +323,16 @@ test("symlink package input fails closed before changing installed files", async
   assert.notEqual(result.status, 0);
   assert.equal(fs.existsSync(f.log), false);
   assert.match(result.stderr, /package input must be a regular file/);
+});
+
+test("package update requires the runtime's imported file bridge before changing installed files", async (t) => {
+  const f = await fixture(t);
+  fs.unlinkSync(path.join(f.source, "file-bridge.mjs"));
+  const result = await f.update();
+  assert.notEqual(result.status, 0);
+  assert.equal(fs.existsSync(f.log), false);
+  assert.equal(fs.readFileSync(path.join(f.installed, "runtime.mjs"), "utf8"), f.oldRuntime);
+  assert.match(result.stderr, /package input must be a regular file: file-bridge\.mjs/);
 });
 
 test("package test command includes safe lifecycle regression coverage", () => {
@@ -451,7 +471,9 @@ test("initial install succeeds on disposable paths and reports an active install
   assert.equal(/^TITAN_NODE_AUTH_TOKEN=[a-f0-9]{64}\n$/.test(fs.readFileSync(f.config, "utf8")), true);
   assert.equal(fs.statSync(f.unit).mode & 0o777, 0o644);
   assert.equal(fs.existsSync(path.join(f.installed, "directadmin-relay.mjs")), true);
+  assert.equal(fs.existsSync(path.join(f.installed, "file-bridge.mjs")), true);
   assert.equal(fs.existsSync(path.join(f.installed, "SHA256SUMS")), true);
+  assert.match(fs.readFileSync(path.join(f.installed, "SHA256SUMS"), "utf8"), /file-bridge\.mjs/);
   assert.equal(f.result.stdout.includes("fixture-only-secret"), false);
 });
 

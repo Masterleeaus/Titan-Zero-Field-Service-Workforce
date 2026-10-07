@@ -135,6 +135,19 @@ async function readBounded(handle, maxBytes, signal) {
   if (total > maxBytes) fail("file_size_limit", 413);
   return buffer.subarray(0, total);
 }
+async function readDirectoryNames(handle, limit) {
+  const directory = await fs.opendir(fdPath(handle));
+  const names = [];
+  try {
+    for await (const entry of directory) {
+      names.push(entry.name);
+      if (names.length > limit) fail("file_directory_entry_limit", 413);
+    }
+    return names;
+  } finally {
+    await directory.close().catch(() => {});
+  }
+}
 async function regularFile(parent, name, maxBytes, signal) {
   checkAbort(signal);
   const handle = await fs.open(childPath(parent, name), constants.O_RDONLY | O_NONBLOCK | O_NOFOLLOW).catch(() => null);
@@ -263,7 +276,7 @@ function tarEntry(entry) {
 }
 
 export class TitanFileBridgeProvider {
-  constructor({ domainProvider, auditSink, revocationStore, commissionedApplications = [], applicationRoots = APP_ROOTS, domainsRoot = "/home/admin/domains", now = () => Date.now() } = {}) {
+  constructor({ domainProvider, auditSink, revocationStore, commissionedApplications = [], applicationRoots = APP_ROOTS, applicationRootBase = "/home/admin/apps", domainsRoot = "/home/admin/domains", now = () => Date.now() } = {}) {
     if (process.platform !== "linux" || typeof O_DIRECTORY !== "number" || typeof O_NOFOLLOW !== "number") throw new TypeError("safe-file-provider-unavailable");
     if (typeof domainProvider?.listRegisteredDomains !== "function" || typeof auditSink !== "function" || typeof revocationStore?.isRevoked !== "function" || typeof revocationStore?.revoke !== "function") throw new TypeError("file-bridge-owner-ports-required");
     this.id = "directadmin:titan-file-bridge";
@@ -274,13 +287,15 @@ export class TitanFileBridgeProvider {
     this.auditSink = auditSink;
     this.revocationStore = revocationStore;
     this.domainsRoot = path.resolve(domainsRoot);
+    if (typeof applicationRootBase !== "string" || !path.isAbsolute(applicationRootBase) || path.resolve(applicationRootBase) !== applicationRootBase) throw new TypeError("invalid-application-root-base");
+    this.applicationRootBase = applicationRootBase;
     this.now = now;
     this.revokedCompanies = new Set();
     this.apps = new Map();
     const knownApps = new Map(APP_ROOTS.map((x) => [x.id, x]));
     for (const mapping of applicationRoots) {
       const known = knownApps.get(mapping?.id);
-      if (!known || known.domain !== mapping.domain || !path.isAbsolute(mapping.path) || path.resolve(mapping.path) !== mapping.path) throw new TypeError("invalid-application-root");
+      if (!known || known.domain !== mapping.domain || mapping.path !== path.join(this.applicationRootBase, mapping.id)) throw new TypeError("invalid-application-root");
       this.apps.set(mapping.id, { ...known, path: mapping.path });
     }
     this.commissioned = new Map();
@@ -324,6 +339,8 @@ export class TitanFileBridgeProvider {
       if (typeof candidate !== "string" || path.resolve(candidate) !== candidate) continue;
       const canonical = await fs.realpath(candidate).catch(() => null);
       if (!canonical || canonical === canonicalBase || !within(canonicalBase, canonical)) continue;
+      const relativeRoot = path.relative(canonicalBase, canonical);
+      if (relativeRoot.split(path.sep).some((part) => SECRET.test(part))) continue;
       const stat = await fs.stat(canonical).catch(() => null);
       if (!stat?.isDirectory()) continue;
       byDomain.set(domain, { root_id: rootKey("domain", domain, company, canonical), domain, company_id: company, canonical_path: canonical, kind: "domain", application_id: null, writable: item.writable === true, device: stat.dev, inode: stat.ino });
@@ -440,8 +457,7 @@ export class TitanFileBridgeProvider {
       const limit = input.limit ?? 200, offset = input.offset ?? 0;
       if (!Number.isInteger(limit) || limit < 1 || limit > 500 || !Number.isInteger(offset) || offset < 0 || offset > FILE_LIMITS.directoryEntries) fail("file_list_pagination_invalid");
       return this.withRoot(scope, (root) => walkDirectory(root, parts, async (dir) => {
-        const raw = await fs.readdir(fdPath(dir));
-        if (raw.length > FILE_LIMITS.directoryEntries) fail("file_directory_entry_limit", 413);
+        const raw = await readDirectoryNames(dir, FILE_LIMITS.directoryEntries);
         const names = raw.filter((x) => !SECRET.test(x)).sort();
         const entries = [];
         for (const name of names.slice(offset, offset + limit + 1)) {
@@ -544,8 +560,7 @@ export class TitanFileBridgeProvider {
     await this.withRoot(scope, (root) => walkDirectory(root, parts, async (base) => {
       const visit = async (dir, prefix) => {
         checkAbort(signal);
-        const names = await fs.readdir(fdPath(dir));
-        if (names.length > FILE_LIMITS.directoryEntries) fail("file_directory_entry_limit", 413);
+        const names = await readDirectoryNames(dir, FILE_LIMITS.directoryEntries);
         for (const name of names.sort()) {
           if (SECRET.test(name)) continue;
           const target = childPath(dir, name);
