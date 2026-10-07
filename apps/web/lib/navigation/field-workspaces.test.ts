@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getFieldWorkspace, getFieldWorkspaceTabs } from "./field-workspaces";
+import { getFieldWorkspace, getFieldWorkspaceActiveTab, getFieldWorkspaceTabs } from "./field-workspaces";
 
 describe("Field workspace routing", () => {
   it("keeps Activity as the return destination for messages and requests", () => {
@@ -16,6 +16,13 @@ describe("Field workspace routing", () => {
 
   it("does not replace the technician's focused mobile workspace", () => {
     expect(getFieldWorkspace("/app/activity", "tech")).toBeNull();
+  });
+
+  it("selects the most specific nested tab and honors Activity's query tabs", () => {
+    expect(getFieldWorkspaceActiveTab("locations", "/app/mileage/vehicles")).toBe("/app/mileage/vehicles");
+    expect(getFieldWorkspaceActiveTab("locations", "/app/mileage")).toBe("/app/mileage");
+    expect(getFieldWorkspaceActiveTab("activity", "/app/activity")).toBe("/app/activity?tab=messages");
+    expect(getFieldWorkspaceActiveTab("activity", "/app/activity", "notifications")).toBe("/app/activity?tab=notifications");
   });
 
   it("retains links to the existing Work and Operations pages", () => {
