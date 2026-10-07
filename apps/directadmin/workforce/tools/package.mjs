@@ -9,12 +9,14 @@ import { gzipSync } from 'node:zlib';
 
 export const packageFiles = Object.freeze([
   'AGENTS.md', 'README.md', 'plugin.conf',
-  'admin/index.html', 'reseller/index.html', 'user/index.html',
+  'admin/index.html', 'admin/bootstrap-nonce.raw', 'admin/bootstrap.raw',
+  'reseller/index.html', 'reseller/bootstrap-nonce.raw', 'reseller/bootstrap.raw',
+  'user/index.html', 'user/bootstrap-nonce.raw', 'user/bootstrap.raw',
   'hooks/admin_txt.html', 'hooks/reseller_txt.html', 'hooks/user_txt.html',
   'scripts/install.sh', 'scripts/update.sh', 'scripts/uninstall.sh',
-  'lib/entry.mjs', 'images/cockpit.mjs', 'images/controller.mjs', 'images/api.mjs', 'images/presentation.mjs', 'images/sdk.mjs', 'images/style.css',
+  'lib/entry.mjs', 'lib/directadmin-bootstrap-raw.mjs', 'images/cockpit.mjs', 'images/controller.mjs', 'images/api.mjs', 'images/presentation.mjs', 'images/sdk.mjs', 'images/style.css',
 ].sort());
-const executable = (file) => /^(admin|reseller|user)\/index\.html$/.test(file) || file.startsWith('scripts/');
+const executable = (file) => /^(admin|reseller|user)\/(?:index\.html|bootstrap(?:-nonce)?\.raw)$/.test(file) || file.startsWith('scripts/');
 
 async function rejectSymlinks(path) {
   const stat = await lstat(path);

@@ -10,13 +10,13 @@ for rel in admin reseller user hooks scripts lib images; do
     exit 1
   fi
 done
-for rel in AGENTS.md README.md plugin.conf admin/index.html reseller/index.html user/index.html hooks/admin_txt.html hooks/reseller_txt.html hooks/user_txt.html scripts/install.sh scripts/update.sh scripts/uninstall.sh lib/entry.mjs images/cockpit.mjs images/controller.mjs images/api.mjs images/presentation.mjs images/sdk.mjs images/style.css; do
+for rel in AGENTS.md README.md plugin.conf admin/index.html admin/bootstrap-nonce.raw admin/bootstrap.raw reseller/index.html reseller/bootstrap-nonce.raw reseller/bootstrap.raw user/index.html user/bootstrap-nonce.raw user/bootstrap.raw hooks/admin_txt.html hooks/reseller_txt.html hooks/user_txt.html scripts/install.sh scripts/update.sh scripts/uninstall.sh lib/entry.mjs lib/directadmin-bootstrap-raw.mjs images/cockpit.mjs images/controller.mjs images/api.mjs images/presentation.mjs images/sdk.mjs images/style.css; do
   if [ ! -f "$PLUGIN_DIR/$rel" ] || [ -L "$PLUGIN_DIR/$rel" ]; then
     echo "Titan Workforce preflight failed: missing or unsafe $rel" >&2
     exit 1
   fi
 done
-for rel in admin/index.html reseller/index.html user/index.html scripts/install.sh scripts/update.sh scripts/uninstall.sh; do
+for rel in admin/index.html admin/bootstrap-nonce.raw admin/bootstrap.raw reseller/index.html reseller/bootstrap-nonce.raw reseller/bootstrap.raw user/index.html user/bootstrap-nonce.raw user/bootstrap.raw scripts/install.sh scripts/update.sh scripts/uninstall.sh; do
   [ -x "$PLUGIN_DIR/$rel" ] || { echo "Titan Workforce preflight failed: $rel must be executable" >&2; exit 1; }
 done
 echo 'Titan Workforce package preflight passed. Configure the protected hosted identity bridge before use; no hosted runtime or business state was changed.'
