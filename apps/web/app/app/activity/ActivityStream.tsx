@@ -18,12 +18,14 @@ type ActivityEvent = {
   read_at: string | null;
 };
 
-type ActivityFilter = "read" | "unread" | "requests" | "estimates" | "invoices";
+type ActivityFilter = "read" | "unread" | "urgent" | "crew" | "requests" | "estimates" | "invoices";
 type CardTone = "attention" | "positive" | "critical" | "neutral";
 
 const FILTERS: Array<{ id: ActivityFilter; label: string }> = [
   { id: "read", label: "Read" },
   { id: "unread", label: "Unread" },
+  { id: "urgent", label: "Urgent" },
+  { id: "crew", label: "Crew" },
   { id: "requests", label: "Requests" },
   { id: "estimates", label: "Estimates" },
   { id: "invoices", label: "Invoices" },
@@ -38,10 +40,16 @@ function typeGroup(type: string): "messages" | "requests" | "estimates" | "invoi
 }
 
 function toneFor(event: ActivityEvent): CardTone {
-  if (event.type === "invoice.overdue") return "critical";
-  if (event.type.includes("paid") || event.type.includes("approved")) return "positive";
-  if (typeGroup(event.type) === "messages" || typeGroup(event.type) === "requests") return "attention";
+  const signal = `${event.type} ${event.title} ${event.summary ?? ""}`.toLowerCase();
+  if (/overdue|sla|emergency|incident|safety|breach|unavailable|critical/.test(signal)) return "critical";
+  if (/paid|approved|completed|verified|recovered/.test(signal)) return "positive";
+  if (/reassign|conflict|delayed|late|shortage|booking_request|request/.test(signal)) return "attention";
   return "neutral";
+}
+
+function isCrewEvent(event: ActivityEvent): boolean {
+  const details = `${event.type} ${event.entity_type ?? ""} ${event.title} ${event.summary ?? ""}`.toLowerCase();
+  return /\\b(crew|worker|technician|field lead|dispatcher)\\b/.test(details);
 }
 
 function eventLabel(type: string): string {
@@ -182,6 +190,8 @@ export function ActivityStream() {
     const read = selectedFilters.includes("read");
     const unread = selectedFilters.includes("unread");
     if (read !== unread) rows = rows.filter((event) => read ? !!event.read_at : !event.read_at);
+    if (selectedFilters.includes("urgent")) rows = rows.filter((event) => toneFor(event) === "critical");
+    if (selectedFilters.includes("crew")) rows = rows.filter(isCrewEvent);
 
     const kinds = selectedFilters.filter((filter) => filter === "requests" || filter === "estimates" || filter === "invoices");
     if (kinds.length) rows = rows.filter((event) => kinds.some((kind) =>
