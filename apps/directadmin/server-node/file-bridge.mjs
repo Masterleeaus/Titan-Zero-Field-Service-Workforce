@@ -29,7 +29,7 @@ const O_DIRECTORY = constants.O_DIRECTORY;
 const O_NONBLOCK = constants.O_NONBLOCK ?? 0;
 const READ = new Set(["files.roots", "files.list", "files.stat", "files.read", "files.download", "files.downloadArchive"]);
 const WRITE = new Set(["files.upload", "files.mkdir"]);
-const SECRET = /^(?:\.env(?:\..*)?|\.ssh|\.aws|\.npmrc|\.pypirc|\.htpasswd|\.my\.cnf|\.pgpass|pg_service\.conf|id_(?:rsa|dsa|ecdsa|ed25519)|authorized_keys|known_hosts|wp-config\.php|credentials?(?:\..*)?|secrets?(?:\..*)?|tokens?(?:\..*)?|.*\.(?:key|pem|p12|pfx)|.*(?:webhook|credential|token|secret|login[_-]?key|directadmin[_-]?(?:key|login)).*)$/i;
+const SECRET = /^(?:\.env(?:\..*)?|\.ssh|\.aws|\.npmrc|\.pypirc|\.htpasswd|\.my\.cnf|\.pgpass|pg_service\.conf|database\.(?:ya?ml|json)|db\.(?:ya?ml|json)|id_(?:rsa|dsa|ecdsa|ed25519)|authorized_keys|known_hosts|wp-config\.php|credentials?(?:\..*)?|secrets?(?:\..*)?|tokens?(?:\..*)?|.*\.(?:key|pem|p12|pfx|jks|keystore)|.*(?:webhook|credential|token|secret|login[_-]?key|directadmin[_-]?(?:key|login)).*)$/i;
 const OMIT_ARCHIVE = new Set([".git", "node_modules", ".cache", "cache", "logs", "log", "dist", "build", ".next", "coverage", "tmp", "temp"]);
 
 export class FileBridgeError extends Error {
@@ -117,6 +117,18 @@ async function withParent(root, parts, run) {
   if (!parts.length) fail("file_path_invalid");
   return walkDirectory(root, parts.slice(0, -1), (parent) => run(parent, parts.at(-1)));
 }
+async function readBounded(handle, maxBytes, signal) {
+  const buffer = Buffer.allocUnsafe(maxBytes + 1);
+  let total = 0;
+  while (total < buffer.length) {
+    checkAbort(signal);
+    const { bytesRead } = await handle.read(buffer, total, buffer.length - total, null);
+    if (bytesRead === 0) break;
+    total += bytesRead;
+  }
+  if (total > maxBytes) fail("file_size_limit", 413);
+  return buffer.subarray(0, total);
+}
 async function regularFile(parent, name, maxBytes, signal) {
   checkAbort(signal);
   const handle = await fs.open(childPath(parent, name), constants.O_RDONLY | O_NONBLOCK | O_NOFOLLOW).catch(() => null);
@@ -125,8 +137,7 @@ async function regularFile(parent, name, maxBytes, signal) {
     const stat = await handle.stat();
     if (!stat.isFile()) fail("file_type_denied", 403);
     if (stat.size > maxBytes) fail("file_size_limit", 413);
-    const bytes = await handle.readFile({ signal });
-    if (bytes.length > maxBytes) fail("file_size_limit", 413);
+    const bytes = await readBounded(handle, maxBytes, signal);
     return { bytes, stat, sha256: hash(bytes) };
   } finally { await handle.close(); }
 }
@@ -250,7 +261,7 @@ export class TitanFileBridgeProvider {
       }
       await this.auditSink(operationAudit(request, this.id, "succeeded", {
         domain: result.domain ?? FILE_ROOT_DOMAIN, canonical_path: result.canonical_path ?? null,
-        canonical_roots: result.roots?.map((x) => x.canonical_path) ?? undefined,
+        canonical_roots: result.roots?.map((x) => ({ domain: x.domain, kind: x.kind, application_id: x.application_id, canonical_path: x.canonical_path })) ?? undefined,
         byte_count: result.byte_count ?? 0, checksum: result.sha256 ?? null,
       }));
       return result;
@@ -430,6 +441,7 @@ export class TitanFileBridgeProvider {
           if (link.isDirectory()) {
             if (OMIT_ARCHIVE.has(name.toLowerCase())) continue;
             entries.push({ name: relative + "/", directory: true, mtime: link.mtimeMs, bytes: Buffer.alloc(0) });
+            if (entries.length > FILE_LIMITS.archiveEntries) fail("file_archive_entry_limit", 413);
             const child = await fs.open(target, constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW).catch(() => null);
             if (!child) fail("file_archive_changed", 409);
             try { await visit(child, relative); } finally { await child.close(); }
@@ -439,8 +451,7 @@ export class TitanFileBridgeProvider {
             try {
               const stat = await file.stat();
               if (!stat.isFile() || stat.size > FILE_LIMITS.archiveInputBytes - bytesTotal) fail("file_archive_size_limit", 413);
-              const content = await file.readFile({ signal });
-              if (content.length > FILE_LIMITS.archiveInputBytes - bytesTotal) fail("file_archive_size_limit", 413);
+              const content = await readBounded(file, FILE_LIMITS.archiveInputBytes - bytesTotal, signal);
               bytesTotal += content.length;
               entries.push({ name: relative, directory: false, mtime: stat.mtimeMs, bytes: content });
               if (entries.length > FILE_LIMITS.archiveEntries) fail("file_archive_entry_limit", 413);
