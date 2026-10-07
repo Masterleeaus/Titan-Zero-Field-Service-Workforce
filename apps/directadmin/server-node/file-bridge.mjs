@@ -31,8 +31,8 @@ const O_DIRECTORY = constants.O_DIRECTORY;
 const O_NONBLOCK = constants.O_NONBLOCK ?? 0;
 const READ = new Set(["files.roots", "files.list", "files.stat", "files.read", "files.download", "files.downloadArchive"]);
 const WRITE = new Set(["files.upload", "files.mkdir"]);
-const SECRET = /^(?:\.env(?:\..*)?|\.ssh|\.aws|\.npmrc|\.pypirc|\.htpasswd|\.my\.cnf|\.pgpass|pg_service\.conf|database\.(?:ya?ml|json)|db\.(?:ya?ml|json)|id_(?:rsa|dsa|ecdsa|ed25519)|authorized_keys|known_hosts|wp-config\.php|credentials?(?:\..*)?|secrets?(?:\..*)?|tokens?(?:\..*)?|.*\.(?:key|pem|p12|pfx|jks|keystore)|.*(?:webhook|credential|token|secret|login[_-]?key|directadmin[_-]?(?:key|login)).*)$/i;
-const OMIT_ARCHIVE = new Set([".git", "node_modules", ".cache", "cache", "logs", "log", "dist", "build", ".next", "coverage", "tmp", "temp"]);
+const SECRET = /^(?:\.env(?:\..*)?|\.ssh|\.aws|\.npmrc|\.pypirc|\.htpasswd|\.my\.cnf|\.pgpass|pg_service\.conf|\.git|\.git-credentials|\.gitconfig|\.svn|\.hg|database\.(?:ya?ml|json|php|ini|conf|xml|toml)(?:\..*)?|db\.(?:ya?ml|json|php|ini|conf|xml|toml)(?:\..*)?|.*\.(?:sqlite3?|db3?|mdb|dump|sql(?:\.gz)?)(?:\..*)?|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|authorized_keys(?:\..*)?|known_hosts(?:\..*)?|wp-config\.php(?:\..*)?|credentials?(?:\..*)?|secrets?(?:\..*)?|tokens?(?:\..*)?|.*\.(?:key|pem|p12|pfx|jks|keystore)(?:\..*)?|.*(?:webhook|credential|token|secret|login[_-]?key|directadmin[_-]?(?:key|login)).*)$/i;
+const OMIT_ARCHIVE = new Set([".git", ".svn", ".hg", "node_modules", ".cache", "cache", "logs", "log", "dist", "build", ".next", "coverage", "tmp", "temp"]);
 const MAX_DOMAIN_INVENTORY_BYTES = 2 * 1024 * 1024;
 
 export class FileBridgeError extends Error {
@@ -186,12 +186,12 @@ function requestDirectAdminJson(url, authorization, timeoutMs) {
  * The API credential is resolved provider-side and never returned to the caller.
  */
 export class DirectAdminDomainInventoryProvider {
-  constructor({ origin, apiUsername, ownerUser, companyId, credentialProvider, writableDomains = [], requestJson = requestDirectAdminJson, timeoutMs = 5000, now = () => Date.now() } = {}) {
+  constructor({ origin, apiUsername, ownerUser, companyId, credentialProvider, writableDomains = [], requestJson = requestDirectAdminJson, timeoutMs = 30000, now = () => Date.now() } = {}) {
     let parsed;
     try { parsed = new URL(origin); } catch { throw new TypeError("directadmin_origin_invalid"); }
     if (parsed.protocol !== "https:" || parsed.port !== "2222" || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) throw new TypeError("directadmin_origin_must_be_fixed_https_panel_origin");
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(apiUsername ?? "") || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(ownerUser ?? "") || !ref(companyId) || typeof credentialProvider?.get !== "function" || typeof requestJson !== "function") throw new TypeError("directadmin_inventory_owner_ports_required");
-    if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 15000) throw new TypeError("directadmin_inventory_timeout_invalid");
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 30000) throw new TypeError("directadmin_inventory_timeout_invalid");
     if (!Array.isArray(writableDomains) || writableDomains.length > 500 || writableDomains.some(domain => !domainName(domain))) throw new TypeError("directadmin_writable_domain_allowlist_invalid");
     this.origin = parsed.origin;
     this.apiUsername = apiUsername;
@@ -328,7 +328,9 @@ export class TitanFileBridgeProvider {
     if (!object(inventory) || !Array.isArray(inventory.domains) || inventory.domains.length > 500) fail("directadmin_domain_inventory_invalid", 503);
     const time = Date.parse(inventory.observed_at);
     if (!Number.isFinite(time) || time > this.now() + 60000 || this.now() - time > FILE_LIMITS.inventoryAgeMs) fail("directadmin_domain_inventory_stale", 503);
-    const domainBase = path.join(this.domainsRoot, FILE_ROOT_DOMAIN);
+    const canonicalDomainsRoot = await fs.realpath(this.domainsRoot).catch(() => null);
+    if (canonicalDomainsRoot !== this.domainsRoot) fail("file_domain_root_unavailable", 503);
+    const domainBase = path.join(canonicalDomainsRoot, FILE_ROOT_DOMAIN);
     const canonicalBase = await fs.realpath(domainBase).catch(() => null);
     if (canonicalBase !== domainBase) fail("file_domain_root_unavailable", 503);
     const byDomain = new Map();
@@ -338,8 +340,16 @@ export class TitanFileBridgeProvider {
       const candidate = item.canonical_document_root;
       if (typeof candidate !== "string" || path.resolve(candidate) !== candidate) continue;
       const canonical = await fs.realpath(candidate).catch(() => null);
-      if (!canonical || canonical === canonicalBase || !within(canonicalBase, canonical)) continue;
-      const relativeRoot = path.relative(canonicalBase, canonical);
+      if (!canonical) continue;
+      const permittedBases = [canonicalBase];
+      if (domain !== FILE_ROOT_DOMAIN) {
+        const ownDomainBase = path.join(canonicalDomainsRoot, domain);
+        const canonicalOwnDomainBase = await fs.realpath(ownDomainBase).catch(() => null);
+        if (canonicalOwnDomainBase === ownDomainBase) permittedBases.push(ownDomainBase);
+      }
+      const permittedBase = permittedBases.find((base) => within(base, canonical));
+      if (!permittedBase || canonical === permittedBase) continue;
+      const relativeRoot = path.relative(permittedBase, canonical);
       if (relativeRoot.split(path.sep).some((part) => SECRET.test(part))) continue;
       const stat = await fs.stat(canonical).catch(() => null);
       if (!stat?.isDirectory()) continue;
