@@ -34,7 +34,7 @@ function fallbackMetrics(workspace: FieldWorkspace): FieldMetric[] {
       { label: "estimates awaiting reply", href: "/app/estimates?status=sent" },
     ],
     operations: [
-      { label: "outstanding AR", href: "/app/invoices" },
+      { label: "outstanding invoices", href: "/app/invoices" },
       { label: "paid revenue this month", href: "/app/reports" },
       { label: "net this month", href: "/app/reports" },
       { label: "jobs opened this month", href: "/app/jobs" },
@@ -148,7 +148,7 @@ export async function loadFieldSidebarMetrics(
 
     const reports = await loadFieldOperationsKpis(accountId, today.slice(0, 7));
     return [
-      { value: formatCents(reports.outstandingReceivablesCents), label: "outstanding AR", href: "/app/invoices", tone: reports.outstandingReceivablesCents > 0 ? "attention" : "positive" },
+      { value: formatCents(reports.outstandingReceivablesCents), label: "outstanding invoices", href: "/app/invoices", tone: reports.outstandingReceivablesCents > 0 ? "attention" : "positive" },
       { value: formatCents(reports.paidRevenueCents), label: "paid revenue this month", href: "/app/reports", tone: reports.paidRevenueCents > 0 ? "positive" : "neutral" },
       { value: formatCents(reports.netCents), label: "net this month", href: "/app/reports", tone: reports.netCents < 0 ? "critical" : reports.netCents > 0 ? "positive" : "neutral" },
       { value: String(reports.jobsOpened), label: "jobs opened this month", href: "/app/jobs", tone: "neutral" },
