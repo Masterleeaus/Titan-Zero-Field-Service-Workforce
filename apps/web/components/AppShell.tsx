@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Route } from "next";
 import { UI } from "@/lib/vocabulary";
@@ -37,6 +37,13 @@ import {
   NavCountBadge,
   useAttentionSummary,
 } from "./attention/AttentionBell";
+import {
+  getFieldWorkspace,
+  getFieldWorkspaceTabs,
+  type FieldMetric,
+  type FieldWorkspace,
+} from "@/lib/navigation/field-workspaces";
+import { ZeroChatFirst } from "@/app/app/ZeroChatFirst";
 
 type IconComponent = (props: { size?: number }) => React.ReactElement;
 
@@ -109,6 +116,22 @@ function buildHubSections(home: NavItem): NavSection[] {
   ];
 }
 
+/** Persistent Field destinations for owner/admin operational routes. */
+function getFieldNavItems(role: Role): NavItem[] {
+  if (role === "tech") return [];
+  return [
+    { href: "/app/activity", label: "Activity", Icon: IconDashboard, activePrefixes: ["/app/activity", "/app/requests"] },
+    { href: "/app/timeline", label: "Locations", Icon: IconField, activePrefixes: ["/app/timeline", "/app/mileage"] },
+    {
+      href: "/app/jobs",
+      label: "Work",
+      Icon: IconJobs,
+      activePrefixes: ["/app/my-work", "/app/jobs", "/app/work-orders", "/app/schedule", "/app/visits", "/app/dispatch"],
+    },
+    { href: "/app/reports", label: "Operations", Icon: IconReports, activePrefixes: ["/app/reports", "/app/day-review", "/app/settings/system-health"] },
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Pure functions
 // ---------------------------------------------------------------------------
@@ -136,7 +159,8 @@ export function getNavSections(role: Role, view: "office" | "field" = "field"): 
  * Mobile bottom tab shortcuts. Owner/admin: 4 hubs (Home / Work / People / Money);
  * AppShell adds the More button as the 5th slot. Tech: My Day + Visits.
  */
-export function getBottomNavItems(role: Role): NavItem[] {
+export function getBottomNavItems(role: Role, fieldMode = false): NavItem[] {
+  if (fieldMode) return getFieldNavItems(role);
   if (role === "tech") {
     const myDay: NavItem = { href: "/app/my-work", label: UI.today, Icon: IconMyDay };
     const visits: NavItem = { href: "/app/visits", label: "Visits", Icon: IconVisits };
@@ -214,20 +238,59 @@ interface AppShellProps {
   role: Role;
   userName?: string;
   reviewPending?: boolean;
+  fieldMetrics?: FieldMetric[];
   children: ReactNode;
 }
 
-export function AppShell({ role, userName, reviewPending, children }: AppShellProps) {
+export function AppShell({ role, userName, reviewPending, fieldMetrics = [], children }: AppShellProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const fieldWorkspace = getFieldWorkspace(pathname, role);
+  const fieldMode = fieldWorkspace !== null;
+  const [fieldMetricState, setFieldMetricState] = useState(() => ({
+    workspace: fieldWorkspace,
+    metrics: fieldMetrics,
+  }));
+  const metricsWorkspace = useRef<FieldWorkspace | null>(fieldWorkspace);
   // The sidebar follows the surface you're on: My Day = field, everything else =
   // office. So Field never shows the Overview home and vice-versa.
-  const sections = getNavSections(role, pathname.startsWith("/app/my-work") ? "field" : "office");
-  const bottomItems = getBottomNavItems(role);
+  const legacySections = getNavSections(role, pathname.startsWith("/app/my-work") ? "field" : "office");
+  const sections = fieldMode ? [{ label: "", items: getFieldNavItems(role) }] : legacySections;
+  const bottomItems = getBottomNavItems(role, fieldMode);
+  const fieldTabs = fieldWorkspace ? getFieldWorkspaceTabs(fieldWorkspace) : [];
   const [showQuickLead, setShowQuickLead] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreSheetRef = useRef<HTMLDivElement>(null);
+
+  // Layouts are preserved during App Router navigation. Refresh the scoped
+  // server metrics when crossing into another Field workspace.
+  useEffect(() => {
+    if (!fieldWorkspace || metricsWorkspace.current === fieldWorkspace) return;
+    metricsWorkspace.current = fieldWorkspace;
+    const controller = new AbortController();
+    setFieldMetricState({ workspace: fieldWorkspace, metrics: [] });
+    void fetch(`/api/v1/field/metrics?workspace=${fieldWorkspace}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Field metrics unavailable");
+        const result = await response.json();
+        if (!Array.isArray(result?.data)) throw new Error("Field metrics unavailable");
+        setFieldMetricState({ workspace: fieldWorkspace, metrics: result.data as FieldMetric[] });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFieldMetricState({ workspace: fieldWorkspace, metrics: [] });
+      });
+    return () => controller.abort();
+  }, [fieldWorkspace]);
+
+  const activeFieldMetrics = fieldMetricState.workspace === fieldWorkspace
+    ? fieldMetricState.metrics
+    : [];
 
   useEffect(() => {
     const val = localStorage.getItem("p7-sidebar-collapsed");
@@ -245,7 +308,7 @@ export function AppShell({ role, userName, reviewPending, children }: AppShellPr
   const isAdminOrOwner = role === "owner" || role === "admin";
   // Logo goes to each role's home: My Day for field roles, the office dashboard
   // for pure admins (who get bounced there from My Day anyway).
-  const homeHref = role === "admin" ? "/app" : "/app/my-work";
+  const homeHref = fieldMode ? "/app/activity" : role === "admin" ? "/app" : "/app/my-work";
 
   const { summary: attention, refresh: refreshAttention } = useAttentionSummary(isAdminOrOwner);
 
@@ -316,7 +379,7 @@ export function AppShell({ role, userName, reviewPending, children }: AppShellPr
     <ToastProvider>
       <LiveRefresh />
       <a className="p7-skip-link" href="#main-content">Skip to main content</a>
-      <div className={`p7-layout ${collapsed ? "p7-layout-collapsed" : ""}`}>
+      <div className={`p7-layout ${collapsed ? "p7-layout-collapsed" : ""} ${fieldMode ? "p7-field-mode" : ""}`}>
         {/* ---- Desktop/Tablet Sidebar ---- */}
         <aside className="p7-sidebar" aria-label="Main navigation">
           {/* Brand */}
@@ -325,9 +388,9 @@ export function AppShell({ role, userName, reviewPending, children }: AppShellPr
               <div className="p7-brand-logo" aria-hidden="true">
                 <span className="p7-brand-logo-text">T0</span>
               </div>
-              <span className="p7-brand-name">Titan Zero</span>
+              <span className="p7-brand-name">{fieldMode ? "Titan Field" : "Titan Zero"}</span>
             </Link>
-            {isAdminOrOwner && !collapsed && (
+            {isAdminOrOwner && !fieldMode && !collapsed && (
               <div style={{ position: "absolute", top: 10, right: 40, zIndex: 2 }}>
                 <AttentionBell summary={attention} onChanged={() => void refreshAttention()} />
               </div>
@@ -343,10 +406,10 @@ export function AppShell({ role, userName, reviewPending, children }: AppShellPr
             </button>
           </div>
 
-          {isAdminOrOwner && <GlobalSearch />}
+          {isAdminOrOwner && !fieldMode && <GlobalSearch />}
 
           {/* New Request button — owner/admin only */}
-          {isAdminOrOwner && (
+          {isAdminOrOwner && !fieldMode && (
             <button
               type="button"
               onClick={() => setShowQuickLead(true)}
@@ -441,6 +504,34 @@ export function AppShell({ role, userName, reviewPending, children }: AppShellPr
             ))}
           </nav>
 
+          {fieldMode && (
+            <>
+              <FieldMetrics metrics={activeFieldMetrics} placement="sidebar" workspace={fieldWorkspace} />
+              <details className="p7-field-more">
+                <summary>More</summary>
+                <div className="p7-field-more__panel">
+                  <GlobalSearch />
+                  <button type="button" className="p7-field-more__action" onClick={() => setShowQuickLead(true)}>
+                    <span aria-hidden="true">＋</span> New request
+                  </button>
+                  {legacySections.flatMap((section) => section.items)
+                    .filter((item, index, all) => all.findIndex((candidate) => candidate.href === item.href) === index)
+                    .map((item) => item.href === CAPTURE_HREF ? (
+                      <CaptureLink key={item.href} className="p7-field-more__link">
+                        <item.Icon size={16} />
+                        <span>{item.label}</span>
+                      </CaptureLink>
+                    ) : (
+                      <Link key={item.href} href={item.href as Route} className="p7-field-more__link">
+                        <item.Icon size={16} />
+                        <span>{item.label}</span>
+                      </Link>
+                    ))}
+                </div>
+              </details>
+            </>
+          )}
+
           {/* Footer — user chip + logout */}
           <div className="p7-sidebar-footer">
             {/* Tech sidebar nav has no Settings entry — surface it here so the
@@ -478,8 +569,36 @@ export function AppShell({ role, userName, reviewPending, children }: AppShellPr
               toggle or daily popup. This renders nothing; it only steers entry. */}
           {role === "owner" && <WorkspaceAutoRoute />}
           <ConnectionStatus />
+          {fieldMode && fieldTabs.length > 0 && (
+            <nav className="p7-field-tabs" aria-label={`${fieldWorkspace} workspace`}>
+              {fieldTabs.map((tab) => {
+                const href = tab.href.split("?")[0];
+                const tabValue = new URLSearchParams(tab.href.split("?")[1] ?? "").get("tab");
+                const active = tabValue
+                  ? pathname === href && (searchParams.get("tab") ?? "messages") === tabValue
+                  : pathname === href || pathname.startsWith(`${href}/`);
+                return (
+                  <Link
+                    key={tab.href}
+                    href={tab.href as Route}
+                    className={`p7-field-tab${active ? " is-active" : ""}`}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    {tab.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          )}
+          {fieldMode && <FieldMetrics metrics={activeFieldMetrics} placement="responsive" workspace={fieldWorkspace} />}
           {children}
         </main>
+
+        {fieldMode && (
+          <div className="p7-field-zero-dock" aria-label="Titan Zero conversation">
+            <ZeroChatFirst compact />
+          </div>
+        )}
 
         {/* ---- Mobile bottom tab bar ---- */}
         <nav className="p7-bottom-nav" aria-label="Mobile navigation">
@@ -559,13 +678,13 @@ export function AppShell({ role, userName, reviewPending, children }: AppShellPr
                   ×
                 </button>
               </div>
-              {isAdminOrOwner && (
+              {isAdminOrOwner && !fieldMode && (
                 <div style={{ display: "flex", justifyContent: "flex-end", padding: "8px 12px 0" }}>
                   <AttentionBell summary={attention} onChanged={() => void refreshAttention()} />
                 </div>
               )}
               <div className="p7-more-sections">
-                {sections.map((section, sectionIdx) => (
+                {legacySections.map((section, sectionIdx) => (
                   <div key={sectionIdx} className="p7-more-section">
                     {section.label ? (
                       <div className="p7-more-section-label">{section.label}</div>
@@ -679,10 +798,39 @@ export function AppShell({ role, userName, reviewPending, children }: AppShellPr
         )}
       </div>
       {showQuickLead && <QuickLeadModal onClose={() => setShowQuickLead(false)} />}
-      {isAdminOrOwner &&
+      {isAdminOrOwner && !fieldMode &&
         !pathname.startsWith("/app/my-work") &&
         !pathname.startsWith("/app/capture") && <FloatingActionButton />}
     </ToastProvider>
+  );
+}
+
+function FieldMetrics({
+  metrics,
+  placement,
+  workspace,
+}: {
+  metrics: FieldMetric[];
+  placement: "sidebar" | "responsive";
+  workspace: string | null;
+}) {
+  return (
+    <div
+      className={`p7-field-metrics p7-field-metrics--${placement}`}
+      aria-label={`${workspace ?? "Field"} metrics`}
+    >
+      {metrics.map((metric, index) => (
+        <Link
+          key={`${metric.label}-${index}`}
+          href={metric.href as Route}
+          className={`p7-field-metric p7-field-metric--${metric.tone}`}
+          title={`${metric.value} ${metric.label}`}
+        >
+          <strong>{metric.value}</strong>
+          <span>{metric.label}</span>
+        </Link>
+      ))}
+    </div>
   );
 }
 
