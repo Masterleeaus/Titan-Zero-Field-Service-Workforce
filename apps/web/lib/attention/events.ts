@@ -37,6 +37,19 @@ export async function markAttentionEventRead(
   return (r.rowCount ?? 0) > 0;
 }
 
+/** Delete only the tenant-owned notification row, never its related business record. */
+export async function deleteAttentionEvent(
+  client: DbClient,
+  accountId: string,
+  eventId: string,
+): Promise<boolean> {
+  const r = await client.query(
+    `DELETE FROM attention_events WHERE id = $1 AND account_id = $2`,
+    [eventId, accountId],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
 export async function markAllAttentionEventsRead(
   client: DbClient,
   accountId: string,
