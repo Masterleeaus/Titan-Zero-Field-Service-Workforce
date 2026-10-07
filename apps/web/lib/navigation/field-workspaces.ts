@@ -72,3 +72,22 @@ export function getFieldWorkspaceRoutes(workspace: FieldWorkspace): readonly str
 export function getFieldWorkspaceTabs(workspace: FieldWorkspace): readonly FieldWorkspaceTab[] {
   return WORKSPACE_TABS[workspace];
 }
+
+/** Return the most specific tab matching a nested workspace route. */
+export function getFieldWorkspaceActiveTab(
+  workspace: FieldWorkspace,
+  pathname: string,
+  selectedTab?: string | null,
+): string | null {
+  const activityTab = selectedTab === "notifications" ? "notifications" : "messages";
+  const matches = WORKSPACE_TABS[workspace].filter((tab) => {
+    const [route, query = ""] = tab.href.split("?");
+    const queryTab = new URLSearchParams(query).get("tab");
+    if (queryTab) return pathname === route && queryTab === activityTab;
+    return pathname === route || pathname.startsWith(`${route}/`);
+  });
+  matches.sort((left, right) =>
+    right.href.split("?")[0].length - left.href.split("?")[0].length,
+  );
+  return matches[0]?.href ?? null;
+}
