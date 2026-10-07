@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
-import type { Route } from "next";
 import { getSession } from "@/lib/auth/session";
 import { queryForSession } from "@/lib/db";
-import { LinkButton, PageContainer, PageHeader } from "@/components/ui";
+import { PageContainer, PageHeader } from "@/components/ui";
 import { TimelineEditor } from "../TimelineEditor";
 import { LocationSegmentsPanel } from "../LocationSegmentsPanel";
 import { ManualSiteVisitButton } from "../ManualSiteVisitButton";
@@ -88,21 +87,12 @@ export default async function TimelinePage({
   return (
     <PageContainer>
       <PageHeader
-        title="Vehicle tracking"
+        title="Locations"
         subtitle={label}
-        actions={
-          <span style={{ display: "inline-flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-            <LinkButton href={"/app/mileage" as Route} variant="ghost" size="sm">
-              Mileage
-            </LinkButton>
-            <LinkButton href={"/app/mileage/vehicles" as Route} variant="ghost" size="sm">
-              Vehicles
-            </LinkButton>
-            <ManualSiteVisitButton />
-          </span>
-        }
+        actions={<ManualSiteVisitButton />}
       />
       <LikelySiteBanner />
+      <DayMapPanel day={day} />
       <div style={{ marginBottom: "var(--space-4)" }}>
         <TimelineDayNav date={day} />
       </div>
@@ -122,10 +112,6 @@ export default async function TimelinePage({
           hideDayNav
           defaultExpanded={false}
         />
-      </div>
-      {/* 3. Map — supporting context */}
-      <div style={{ marginTop: "var(--space-6)" }}>
-        <DayMapPanel day={day} />
       </div>
     </PageContainer>
   );
