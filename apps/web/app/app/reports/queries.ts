@@ -143,6 +143,64 @@ export interface ReportData {
 }
 
 // ---------------------------------------------------------------------------
+export interface FieldOperationsKpis {
+  outstandingReceivablesCents: number;
+  paidRevenueCents: number;
+  expensesCents: number;
+  netCents: number;
+  jobsOpened: number;
+}
+
+/** Lightweight summary used by the Field sidebar; does not load report tables. */
+export async function loadFieldOperationsKpis(
+  accountId: string,
+  targetMonth: string,
+): Promise<FieldOperationsKpis> {
+  const rows = await query<{
+    outstanding_receivables_cents: string;
+    paid_revenue_cents: string;
+    expenses_cents: string;
+    jobs_opened: number;
+  }>(
+    `SELECT
+       COALESCE((
+         SELECT SUM(GREATEST(total_cents - paid_cents, 0))
+         FROM invoices
+         WHERE account_id = $1 AND status IN ('sent', 'partial', 'overdue')
+       ), 0)::text AS outstanding_receivables_cents,
+       COALESCE((
+         SELECT SUM(paid_cents)
+         FROM invoices
+         WHERE account_id = $1 AND status != 'void'
+           AND to_char(created_at, 'YYYY-MM') = $2
+       ), 0)::text AS paid_revenue_cents,
+       COALESCE((
+         SELECT SUM(amount_cents)
+         FROM expenses
+         WHERE account_id = $1
+           AND to_char(expense_date, 'YYYY-MM') = $2
+       ), 0)::text AS expenses_cents,
+       (
+         SELECT COUNT(*)::int
+         FROM jobs
+         WHERE account_id = $1
+           AND to_char(created_at, 'YYYY-MM') = $2
+       ) AS jobs_opened`,
+    [accountId, targetMonth],
+  );
+  const row = rows[0];
+  const outstandingReceivablesCents = Number(row?.outstanding_receivables_cents ?? 0);
+  const paidRevenueCents = Number(row?.paid_revenue_cents ?? 0);
+  const expensesCents = Number(row?.expenses_cents ?? 0);
+  return {
+    outstandingReceivablesCents,
+    paidRevenueCents,
+    expensesCents,
+    netCents: paidRevenueCents - expensesCents,
+    jobsOpened: Number(row?.jobs_opened ?? 0),
+  };
+}
+
 // Data loader — runs every Reports query for the target month.
 // ---------------------------------------------------------------------------
 
