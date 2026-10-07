@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "start": "node runtime.mjs --serve",
-    "test": "node --test runtime.test.mjs runtime.security.test.mjs directadmin-relay.test.mjs directadmin-relay-preflight.test.mjs lifecycle.test.mjs"
+    "test": "node --test runtime.test.mjs runtime.security.test.mjs runtime.file-bridge.test.mjs directadmin-relay.test.mjs directadmin-relay-preflight.test.mjs lifecycle.test.mjs file-bridge.test.mjs"
   }
 }
