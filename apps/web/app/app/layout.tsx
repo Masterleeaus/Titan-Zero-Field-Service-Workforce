@@ -6,6 +6,8 @@ import { getDatabaseDialect } from "@/lib/db/dialect";
 import { portableQuery } from "@/lib/db/portable";
 import { businessToday } from "@/lib/operations/business-day";
 import { AppShell } from "@/components/AppShell";
+import { getFieldWorkspace } from "@/lib/navigation/field-workspaces";
+import { loadFieldSidebarMetrics } from "@/lib/field/sidebar-metrics";
 import {
   CAPTURE_PATH,
   loginRedirectForPath,
@@ -43,9 +45,18 @@ export default async function AppLayout({
   ]);
   const userName = users[0]?.full_name ?? "";
   const reviewPending = reviewRows[0]?.pending ?? false;
+  const fieldWorkspace = getFieldWorkspace(pathname, session.role);
+  const fieldMetrics = fieldWorkspace
+    ? await loadFieldSidebarMetrics(session, fieldWorkspace)
+    : [];
 
   return (
-    <AppShell role={session.role} userName={userName} reviewPending={reviewPending}>
+    <AppShell
+      role={session.role}
+      userName={userName}
+      reviewPending={reviewPending}
+      fieldMetrics={fieldMetrics}
+    >
       {children}
     </AppShell>
   );
