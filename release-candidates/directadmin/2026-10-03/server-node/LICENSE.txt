@@ -1,0 +1,11 @@
+SPDX-License-Identifier: LicenseRef-TitanZero-Proprietary
+
+PROPRIETARY SOFTWARE — ALL RIGHTS RESERVED
+
+Artifact: Titan Server Node 0.3.0 (titan-server-node)
+Archive: titan-server-node.tar.gz
+SHA-256: 580676074d64c431f9d635908f1f71f05aae110b6882f8ace3c2aea0c06f975d
+
+This artifact is proprietary. All rights in its contents remain with their respective rights holders. This repository publication and this notice do not grant a right or license to use, install, run, reproduce, modify, prepare derivative works from, distribute, publish, sublicense, or commercially exploit the artifact. Any permitted use requires separate written permission from the applicable rights holder(s).
+
+No license to any Titan, Titan Zero, DirectAdmin, or other name, logo, trademark, service mark, product identity, or trade dress is granted. This notice applies only to the exact installer archive identified above and does not license the repository, any other product, or third-party material.

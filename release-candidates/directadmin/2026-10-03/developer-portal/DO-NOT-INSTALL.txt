@@ -1,0 +1,11 @@
+DO NOT INSTALL OR RUN — Developer Portal 1.3.10
+
+Artifact: `titan_dev_access.tar.gz`
+SHA-256: `90261a3dd1d3bc05fa0425466b15b394d936523abfe1f8499d255d62c1f41c27`
+Source commit: `10f5ee96626663abea770132de6397063b5b688c`
+
+This archive is retained for audit and hash provenance only. Independent review reported a potential private-key disclosure path in the pinned source. No actual private key was read. Do not install or run this version.
+
+The owner requires the source fix, a passing role-executable negative regression, and independent review of a replacement package before a replacement can be published. Product-owner verification is also outstanding. Any replacement must have a new version and archive hash; preserve this 1.3.10 TAR and its SHA-256 for the audit trail.
+
+Security finding: https://github.com/Masterleeaus/Titan-Zero-Field-Service-Workforce/pull/1438#issuecomment-5969796119

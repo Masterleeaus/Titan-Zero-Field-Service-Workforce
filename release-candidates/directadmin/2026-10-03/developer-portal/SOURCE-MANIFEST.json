@@ -1,0 +1,154 @@
+{
+  "schema": "titan.directadmin.source-manifest/v1",
+  "artifact_id": "developer-portal-directadmin",
+  "display_name": "Developer Portal",
+  "plugin_id": "titan_dev_access",
+  "version": "1.3.10",
+  "archive": {
+    "filename": "titan_dev_access.tar.gz",
+    "sha256": "90261a3dd1d3bc05fa0425466b15b394d936523abfe1f8499d255d62c1f41c27",
+    "file_count": 13,
+    "license_documents_inside_archive": false
+  },
+  "source": {
+    "repository": "Masterleeaus/Titan-Zero-Field-Service-Workforce",
+    "path": "apps/directadmin/dev-access",
+    "revision": "10f5ee96626663abea770132de6397063b5b688c"
+  },
+  "packaging": {
+    "workflow_run_id": 37077046801,
+    "workflow_commit": "11cdf067c0c7d2bd5500007e204248d6a2004d7c",
+    "builder_script_path": "apps/directadmin/dev-access/tools/package.sh",
+    "builder_script_git_blob": "9645e91bb469625d7d8fa04a47edccf0ac3e2d15",
+    "builder_script_sha256": "cdf6bc01d87c32e4658bd15442d938df4a964abf2dd1a23adde511b057f0e041"
+  },
+  "dependency_inventory": {
+    "packaged_third_party_components": [],
+    "runtime_package_dependencies": [],
+    "host_interfaces_not_redistributed": [
+      "DirectAdmin plugin and role interfaces",
+      "PHP CLI",
+      "Git and standard host system utilities"
+    ],
+    "status": "complete for this archive payload"
+  },
+  "files": [
+    {
+      "mode": "0755",
+      "path": "admin/index.html",
+      "sha256": "9c0c3f1d26d4c604e9ee55408fc9eea7688ba3d5c798b718573d19a76d7e1c92",
+      "size_bytes": 126,
+      "source_path": "apps/directadmin/dev-access/admin/index.html",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "bbcc25e3c4b47d70f5b8e5216f4cc09035623589"
+    },
+    {
+      "mode": "0644",
+      "path": "AGENTS.md",
+      "sha256": "1aeeade75598992b06bec9eb9745489614408a66f77beaa07cd5fb6b0b5ff179",
+      "size_bytes": 4182,
+      "source_path": "apps/directadmin/dev-access/AGENTS.md",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "54b2e49a9949ad6cb90bf102e9133bb0c06d7e71"
+    },
+    {
+      "mode": "0644",
+      "path": "hooks/admin_txt.html",
+      "sha256": "67359b48328f209eb2ba4ae92f9d5370d4a5fff90826f36324d7f0ef732f1e9a",
+      "size_bytes": 67,
+      "source_path": "apps/directadmin/dev-access/hooks/admin_txt.html",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "90dd9e4c38977dce6e42f182e26eb8e3c5599828"
+    },
+    {
+      "mode": "0644",
+      "path": "hooks/reseller_txt.html",
+      "sha256": "885e8842481ea408f68d5a78c3e2436ff539046b59b6eca27d5810eaabef0bb8",
+      "size_bytes": 70,
+      "source_path": "apps/directadmin/dev-access/hooks/reseller_txt.html",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "032a1209c3dd3c848375b9f80eea9737233e89b0"
+    },
+    {
+      "mode": "0644",
+      "path": "hooks/user_txt.html",
+      "sha256": "08cc65f1db6516ad05d42223401007a2b41465825822c0bb60682e2a0b41a4ea",
+      "size_bytes": 61,
+      "source_path": "apps/directadmin/dev-access/hooks/user_txt.html",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "34c4a8620d12dccd1263e577261363b422d877a2"
+    },
+    {
+      "mode": "0644",
+      "path": "lib/app.php",
+      "sha256": "9ff6cb99e7f8a3b52b847bd64d34f929726e9a2c77bdc79ec301968a522c41bb",
+      "size_bytes": 75274,
+      "source_path": "apps/directadmin/dev-access/lib/app.php",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "a82c3395aaaf9a6790a60fcac314256b6228d310"
+    },
+    {
+      "mode": "0644",
+      "path": "plugin.conf",
+      "sha256": "e0dd99e50b282d31ef192e87c7b9fef12156bac00b67dbeb43435b3336a12554",
+      "size_bytes": 66,
+      "source_path": "apps/directadmin/dev-access/plugin.conf",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "72f5623e15c98bde430d32d18f274bc2a8dac5cd"
+    },
+    {
+      "mode": "0644",
+      "path": "README.md",
+      "sha256": "ddf9a5b1618aec69e6eb37c4ca53397333d2524987bb91b64bfc45e1567091e3",
+      "size_bytes": 9371,
+      "source_path": "apps/directadmin/dev-access/README.md",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "d0cabba81c1fd2c6e0fa33525904ca5009bb90a3"
+    },
+    {
+      "mode": "0755",
+      "path": "reseller/index.html",
+      "sha256": "2fddd997f98a8505af82ede1511413542d51aed48d227421115368328f3eb1d9",
+      "size_bytes": 129,
+      "source_path": "apps/directadmin/dev-access/reseller/index.html",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "87cf38bfcb346363e69112655b027559a0cd22b8"
+    },
+    {
+      "mode": "0755",
+      "path": "scripts/install.sh",
+      "sha256": "98f0c2c9dadaa0b77b5496b756bb01516ebfa976eb67308de71fc700d9e49679",
+      "size_bytes": 715,
+      "source_path": "apps/directadmin/dev-access/scripts/install.sh",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "64a8472155441241bfb88a3d38ac85adb5cd22f9"
+    },
+    {
+      "mode": "0755",
+      "path": "scripts/uninstall.sh",
+      "sha256": "2a7e75c1bf43b52adade3e32a5141c54ff97dd8b6cd554608b650c0637c7dd1d",
+      "size_bytes": 151,
+      "source_path": "apps/directadmin/dev-access/scripts/uninstall.sh",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "e140418f98518a2f24810a9ddd3297c9db804b9a"
+    },
+    {
+      "mode": "0755",
+      "path": "scripts/update.sh",
+      "sha256": "1345f4f558033a51392a4fdca2c826ad939b1d42cac9ae3bcbb1af4482390439",
+      "size_bytes": 1391,
+      "source_path": "apps/directadmin/dev-access/scripts/update.sh",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "5c4ed19eb14b06df9780241abc278aa81e0de9f7"
+    },
+    {
+      "mode": "0755",
+      "path": "user/index.html",
+      "sha256": "f9de657d282a115ec47baf5c3f2c999b7d132560d662143a744da520e7cdf193",
+      "size_bytes": 125,
+      "source_path": "apps/directadmin/dev-access/user/index.html",
+      "source_revision": "10f5ee96626663abea770132de6397063b5b688c",
+      "source_git_blob": "d12217b991947e52979fc9aabd039fd44b19628f"
+    }
+  ]
+}

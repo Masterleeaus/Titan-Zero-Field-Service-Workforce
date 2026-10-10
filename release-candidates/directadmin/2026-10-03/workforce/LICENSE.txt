@@ -1,0 +1,11 @@
+SPDX-License-Identifier: LicenseRef-TitanZero-Proprietary
+
+PROPRIETARY SOFTWARE — ALL RIGHTS RESERVED
+
+Artifact: Titan Workforce 0.1.6 (titan_workforce)
+Archive: titan_workforce.tar.gz
+SHA-256: 100ecd5c58d6de7f0cfb02636d58440ae05751293047d5cdce6bd61bcf556b26
+
+This artifact is proprietary. All rights in its contents remain with their respective rights holders. This repository publication and this notice do not grant a right or license to use, install, run, reproduce, modify, prepare derivative works from, distribute, publish, sublicense, or commercially exploit the artifact. Any permitted use requires separate written permission from the applicable rights holder(s).
+
+No license to any Titan, Titan Zero, DirectAdmin, or other name, logo, trademark, service mark, product identity, or trade dress is granted. This notice applies only to the exact installer archive identified above and does not license the repository, any other product, or third-party material.

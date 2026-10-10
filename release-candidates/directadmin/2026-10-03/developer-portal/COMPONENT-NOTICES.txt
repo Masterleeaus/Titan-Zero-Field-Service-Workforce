@@ -1,0 +1,1 @@
+No third-party runtime or source components are redistributed in this archive. The archive contains only the exact first-party package files listed in SOURCE-MANIFEST.json. PHP CLI, DirectAdmin plugin/role interfaces, Git, and standard host system utilities are execution-environment interfaces and are not packaged dependencies.

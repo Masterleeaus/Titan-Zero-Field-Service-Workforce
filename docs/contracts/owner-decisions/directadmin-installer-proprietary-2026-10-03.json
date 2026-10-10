@@ -1,0 +1,51 @@
+{
+  "schema": "titan-distribution-owner-decision/v1",
+  "decision_id": "directadmin-installers-proprietary-2026-10-03",
+  "status": "approved",
+  "approved_artifacts": [
+    "titan-server-node-directadmin",
+    "developer-portal-directadmin",
+    "titan-workforce-directadmin"
+  ],
+  "decision": "PROPRIETARY_ALL_RIGHTS_RESERVED",
+  "spdx_license_ref": "LicenseRef-TitanZero-Proprietary",
+  "scope": "Only the three named DirectAdmin installer archives and their identified first-party contents. This does not license the source repository or any unrelated artifact or product.",
+  "approver": "Masterleeaus",
+  "approver_role": "Repository owner account; authenticated GitHub login verified as Masterleeaus",
+  "approval_evidence": {
+    "channel": "user instruction in this ChatGPT session",
+    "date": "2026-10-03",
+    "selected_terms": "Proprietary",
+    "publication_authorization": "Can u save them to repo?"
+  },
+  "restrictions": {
+    "open_source_reuse_granted": false,
+    "trademark_or_logo_license_granted": false,
+    "third_party_rights_granted": false,
+    "use_permission": "No permission to use, install, run, copy, modify, distribute, sublicense, or create derivative works is granted by repository publication; any permitted use requires separate written permission from applicable rights holder(s)."
+  },
+  "artifacts": [
+    {
+      "id": "titan-server-node-directadmin",
+      "filename": "titan-server-node.tar.gz",
+      "version": "0.3.0",
+      "license_ref": "LicenseRef-TitanZero-Proprietary",
+      "archive_sha256": "580676074d64c431f9d635908f1f71f05aae110b6882f8ace3c2aea0c06f975d"
+    },
+    {
+      "id": "developer-portal-directadmin",
+      "filename": "titan_dev_access.tar.gz",
+      "version": "1.3.10",
+      "license_ref": "LicenseRef-TitanZero-Proprietary",
+      "archive_sha256": "90261a3dd1d3bc05fa0425466b15b394d936523abfe1f8499d255d62c1f41c27"
+    },
+    {
+      "id": "titan-workforce-directadmin",
+      "filename": "titan_workforce.tar.gz",
+      "version": "0.1.6",
+      "license_ref": "LicenseRef-TitanZero-Proprietary",
+      "archive_sha256": "100ecd5c58d6de7f0cfb02636d58440ae05751293047d5cdce6bd61bcf556b26"
+    }
+  ],
+  "recorded_at_utc": "2026-10-03T13:03:36+00:00"
+}

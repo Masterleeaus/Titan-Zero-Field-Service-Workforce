@@ -1,0 +1,190 @@
+{
+  "schema": "titan.directadmin.source-manifest/v1",
+  "artifact_id": "titan-server-node-directadmin",
+  "display_name": "Titan Server Node",
+  "plugin_id": "titan-server-node",
+  "version": "0.3.0",
+  "archive": {
+    "filename": "titan-server-node.tar.gz",
+    "sha256": "580676074d64c431f9d635908f1f71f05aae110b6882f8ace3c2aea0c06f975d",
+    "file_count": 15,
+    "license_documents_inside_archive": false
+  },
+  "source": {
+    "repository": "Masterleeaus/Titan-Zero-Field-Service-Workforce",
+    "path": "apps/directadmin/server-node",
+    "revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+    "git_tree_oid": "ffb2ce077426dfd5400f37ebdba858d989b9db0c",
+    "git_object_format": "sha1"
+  },
+  "packaging": {
+    "portfolio_orchestrator": {
+      "revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "path": "scripts/package-directadmin-portfolio.mjs",
+      "sha256": "6f611eb94942613433cdd53f201ad361b484e1e63603274c71c1618b67479679",
+      "git_blob_oid": "351c72c3d22832476cc32fdc3e00c634f41ed152",
+      "git_object_format": "sha1"
+    },
+    "builder_script_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+    "builder_script_path": "scripts/package-directadmin-plugin.mjs",
+    "builder_script_sha256": "d18300abe715d6c3f481a9208cc91c7d753098041d0f6cd06326581e90f7994e",
+    "builder_script_git_blob": "9c5ab8c4392a316f72e3d98d6d19940af38bb60e",
+    "builder_script_git_object_format": "sha1"
+  },
+  "dependency_inventory": {
+    "packaged_third_party_components": [],
+    "runtime_package_dependencies": [],
+    "host_interfaces_not_redistributed": [
+      "Node.js built-ins",
+      "DirectAdmin CGI/plugin interfaces",
+      "systemd",
+      "flock",
+      "curl",
+      "standard shell utilities"
+    ],
+    "status": "complete for this archive payload"
+  },
+  "files": [
+    {
+      "path": "plugin.conf",
+      "mode": "0644",
+      "size_bytes": 132,
+      "sha256": "3ea29421ec7507698f87be8f1a3756f86f283590959e74ee697050feea3f4e43",
+      "source_path": "apps/directadmin/server-node/plugin.conf",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "deacb81a9528e1be1ffc5a44569b9b4a53291c31"
+    },
+    {
+      "path": "install.sh",
+      "mode": "0755",
+      "size_bytes": 13827,
+      "sha256": "6387f625d4925f47ed2c093d6f1a8ae3f2a3d43b67e32f46a2b2b6a823c5b421",
+      "source_path": "apps/directadmin/server-node/install.sh",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "2ae87fe905b02fea5ebfd4c5b5f922530aa61679"
+    },
+    {
+      "path": "update.sh",
+      "mode": "0755",
+      "size_bytes": 15908,
+      "sha256": "ab26e4b8afa087b5271973d5b621dd6861d2fb47869406eb4e0dca5664c696ca",
+      "source_path": "apps/directadmin/server-node/update.sh",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "1826ebbf7a45959424ae5db764c882685b160109"
+    },
+    {
+      "path": "uninstall.sh",
+      "mode": "0755",
+      "size_bytes": 5776,
+      "sha256": "a35d3c98ec2e85f5ac1827bb0881233ceeeabac3bf18145c4bafc58177de51d3",
+      "source_path": "apps/directadmin/server-node/uninstall.sh",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "4334a530ae0702591cd4139c6b6ddfed93d23577"
+    },
+    {
+      "path": "health.sh",
+      "mode": "0755",
+      "size_bytes": 1174,
+      "sha256": "b0970911a219984df89892d4cc0b7a290a08958f0671fbb7625dcf90601b0f30",
+      "source_path": "apps/directadmin/server-node/health.sh",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "4755a251bd9e445b971a4508fc451c11889640c6"
+    },
+    {
+      "path": "runtime.mjs",
+      "mode": "0644",
+      "size_bytes": 35673,
+      "sha256": "af60bd99fc545292f118ebfecf57ec2a8874d1add37b92f0a169203e8ea6dc65",
+      "source_path": "apps/directadmin/server-node/runtime.mjs",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "ddd1bfb8ef4ae60554c57ce96d967221c9c4b5a4"
+    },
+    {
+      "path": "directadmin-relay.mjs",
+      "mode": "0644",
+      "size_bytes": 30140,
+      "sha256": "c507db3f16eb49a5855179f6f02ffab70c6d364ec9e4798e243d9c9e7b3ed391",
+      "source_path": "apps/directadmin/server-node/directadmin-relay.mjs",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "b5abc3adcfa582fd03424d0f1a0f849d8e9e6a18"
+    },
+    {
+      "path": "package.json",
+      "mode": "0644",
+      "size_bytes": 292,
+      "sha256": "9706f8bdcbae5c2bbd84fe5c64ed16b776ae1175c2589cc1adc8a659ed619689",
+      "source_path": "apps/directadmin/server-node/package.json",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "e1fd023cc06d6d0235cd84d73ae0bb1da8b15670"
+    },
+    {
+      "path": "titan-server-node.service",
+      "mode": "0644",
+      "size_bytes": 557,
+      "sha256": "0ec85361533ef0cb816060c38297f1778f383dd295a88366c65ec1cbc4ae3040",
+      "source_path": "apps/directadmin/server-node/titan-server-node.service",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "1557de5d03b2690fa83163b1f7fb10218502f14f"
+    },
+    {
+      "path": "scripts/install.sh",
+      "mode": "0755",
+      "size_bytes": 102,
+      "sha256": "fc79f1ee6cfe57d23a4d8a6d948ed430883b52563b36f04d29d06a05f9d47d6e",
+      "source_path": "apps/directadmin/server-node/scripts/install.sh",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "c82a48038acbabb56ad15ac2813b72f36d0f680b"
+    },
+    {
+      "path": "scripts/update.sh",
+      "mode": "0755",
+      "size_bytes": 101,
+      "sha256": "e8dd67a7dab8407031a490919a4cb19f7dfbce2c87aeb6546bee088e4c03ccdf",
+      "source_path": "apps/directadmin/server-node/scripts/update.sh",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "098102c2bcee5544efd25ffcb21d0deb8e69a242"
+    },
+    {
+      "path": "scripts/uninstall.sh",
+      "mode": "0755",
+      "size_bytes": 104,
+      "sha256": "e6819a2a6d4ccab8fcdf4324e1defb0e48e386943564c4da0f1f7dc74d813a28",
+      "source_path": "apps/directadmin/server-node/scripts/uninstall.sh",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "e39203b0b6a80d77e69b8c92bd453dc0b98ed329"
+    },
+    {
+      "path": "user/index.html",
+      "mode": "0755",
+      "size_bytes": 183,
+      "sha256": "d5fbc734823f9840c8b4cb8d585d89679f57eff3b8bd7d6a42624eff95072faa",
+      "source_path": "apps/directadmin/server-node/user/index.html",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "a71fb6d72cdf6977a4e1cf2d2ff957452b01b866"
+    },
+    {
+      "path": "user/directadmin-gateway.raw",
+      "mode": "0755",
+      "size_bytes": 723,
+      "sha256": "7d2d6cab76b3e3a1dd19226962745eb0b4232332978aa6c26757394267e0e755",
+      "source_path": "apps/directadmin/server-node/user/directadmin-gateway.raw",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "533430421dbed5e0b60cbe0a00aa0f7f39254e9a"
+    },
+    {
+      "path": "images/directadmin-relay-client.mjs",
+      "mode": "0644",
+      "size_bytes": 3669,
+      "sha256": "d9111d7b6b9f14b43d1d741964ea8fb07053fcdd0d4c004b947434105679e7fe",
+      "source_path": "apps/directadmin/server-node/images/directadmin-relay-client.mjs",
+      "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "source_git_blob": "de26c18f3880261c1b996096a204eaee014445c7"
+    }
+  ],
+  "verification": {
+    "sidecar_matches": true,
+    "all_regular_source_files_match_pinned_commit": true,
+    "unsafe_paths_symlinks_special_files": false,
+    "executable_modes_checked": true
+  }
+}

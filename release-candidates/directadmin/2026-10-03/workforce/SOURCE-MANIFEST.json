@@ -1,0 +1,325 @@
+{
+  "schema": "titan.directadmin.source-manifest/v1",
+  "artifact_id": "titan-workforce-directadmin",
+  "display_name": "Titan Workforce",
+  "plugin_id": "titan_workforce",
+  "version": "0.1.6",
+  "archive": {
+    "filename": "titan_workforce.tar.gz",
+    "sha256": "100ecd5c58d6de7f0cfb02636d58440ae05751293047d5cdce6bd61bcf556b26",
+    "file_count": 26,
+    "license_documents_inside_archive": false
+  },
+  "source": {
+    "repository": "Masterleeaus/Titan-Zero-Field-Service-Workforce",
+    "path": "apps/directadmin/workforce",
+    "revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+    "current_pr_head": "433902270dc6a58a5e70ae16ae541b4d9de49883",
+    "packaged_path_diff_after_pin": [],
+    "git_tree_oid": "abd77cbd382c1def96e8cdd705fa732d03933813",
+    "git_object_format": "sha1"
+  },
+  "packaging": {
+    "portfolio_orchestrator": {
+      "revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+      "path": "scripts/package-directadmin-portfolio.mjs",
+      "sha256": "6f611eb94942613433cdd53f201ad361b484e1e63603274c71c1618b67479679",
+      "git_blob_oid": "351c72c3d22832476cc32fdc3e00c634f41ed152",
+      "git_object_format": "sha1"
+    },
+    "builder_script_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+    "builder_script_path": "apps/directadmin/workforce/tools/package.mjs",
+    "builder_script_sha256": "77e72e924f63e262aa6c7ba1cc9cb5e7f279e2544c7b5e5dff7c62d304daacd9",
+    "builder_script_git_blob": "2d8deff0ce7dd88fe718b1c3c02bfc76ee90ca17",
+    "builder_script_git_object_format": "sha1"
+  },
+  "dependency_inventory": {
+    "packaged_third_party_components": [],
+    "runtime_package_dependencies": [],
+    "first_party_artifact_dependencies": [
+      {
+        "plugin_id": "titan-server-node",
+        "version": "0.3.0",
+        "filename": "titan-server-node.tar.gz",
+        "sha256": "580676074d64c431f9d635908f1f71f05aae110b6882f8ace3c2aea0c06f975d",
+        "bundled": false
+      }
+    ],
+    "build_only_tools": [
+      {
+        "name": "esbuild",
+        "version": "0.28.1",
+        "spdx": "MIT",
+        "lockfile": "pnpm-lock.yaml",
+        "lockfile_sha256": "0a10da0aaaf6c8d3df420326b9b1238debc1436e025670448623ab1093c76ad8",
+        "package_license_sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
+        "redistributed": false
+      }
+    ],
+    "status": "complete for payload and recorded toolchain"
+  },
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "mode": "0644",
+      "size_bytes": 541,
+      "sha256": "4b2b1578b18a21dc7c750ebee164a9066923dc1b8bbac365bb1f9484f640db7b",
+      "source_path": "apps/directadmin/workforce/AGENTS.md",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "a9b305e7c7dedce19c90e792224390a5453856a7"
+    },
+    {
+      "path": "README.md",
+      "mode": "0644",
+      "size_bytes": 15434,
+      "sha256": "785f54ace9934adff1069be18abbfb39b8020b539c6dc5e0e8b8bb36f37cc11c",
+      "source_path": "apps/directadmin/workforce/README.md",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "1004d3afcedb99005435e39da05abd24dff61b24"
+    },
+    {
+      "path": "admin/bootstrap-nonce.raw",
+      "mode": "0755",
+      "size_bytes": 692,
+      "sha256": "cd3e58a5ce2c1644e9063abdb294940992909c450529ab4940f03dc928a2adef",
+      "source_path": "apps/directadmin/workforce/admin/bootstrap-nonce.raw",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "fad4819fd7419fc0493b0d03890bce2e4b75dbee"
+    },
+    {
+      "path": "admin/bootstrap.raw",
+      "mode": "0755",
+      "size_bytes": 696,
+      "sha256": "75d44831d21a4026c11cfb6866b3d3f9f5a6132a0dcbad3a43b1dcc31c791fc2",
+      "source_path": "apps/directadmin/workforce/admin/bootstrap.raw",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "57f35107825a5c79b307938089e295f6fcc39e58"
+    },
+    {
+      "path": "admin/index.html",
+      "mode": "0755",
+      "size_bytes": 260,
+      "sha256": "d6fab3e7a7ac9873b7200fa90b35d89390d7d6756ab5fad6c9f1da6dde40063c",
+      "source_path": "apps/directadmin/workforce/admin/index.html",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "a550669187afabb9c29b334abcdf3950be7f5b5b"
+    },
+    {
+      "path": "hooks/admin_txt.html",
+      "mode": "0644",
+      "size_bytes": 65,
+      "sha256": "2840ff3912a716a6f9dcbc126bd37aa6fa71a9de01ca61cb591020aa9ab50b60",
+      "source_path": "apps/directadmin/workforce/hooks/admin_txt.html",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "9b9eda3be2c4908c542d93bfffc4a644c1599fa0"
+    },
+    {
+      "path": "hooks/reseller_txt.html",
+      "mode": "0644",
+      "size_bytes": 68,
+      "sha256": "196931173ebd216e54681502e7084400c64f7171b2ed80301a3a6f858b83b389",
+      "source_path": "apps/directadmin/workforce/hooks/reseller_txt.html",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "4c1b3aefa1e8c5219df6c139e1908e5ea7d74a0a"
+    },
+    {
+      "path": "hooks/user_txt.html",
+      "mode": "0644",
+      "size_bytes": 59,
+      "sha256": "6ea25bce7b69cb8b1ee76abfa10ffc1628fc888078721c3dd1d7a97ef1d27d4b",
+      "source_path": "apps/directadmin/workforce/hooks/user_txt.html",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "0f7493ba01cc5480a8831a51dd24e708e9042103"
+    },
+    {
+      "path": "images/api.mjs",
+      "mode": "0644",
+      "size_bytes": 5874,
+      "sha256": "9df4ece47de0e5f7bd5907a5a78c0eb92a31cfe5537fc8a938dafe69be60de48",
+      "source_path": "apps/directadmin/workforce/images/api.mjs",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "adb0a76980f40fde84db243b2db2027f7ca40d93"
+    },
+    {
+      "path": "images/cockpit.mjs",
+      "mode": "0644",
+      "size_bytes": 30297,
+      "sha256": "fbca89b3c29ac42027f1bd4d858f0a76be052c7703c3c4c1f5bacffd7db994a8",
+      "source_path": "apps/directadmin/workforce/images/cockpit.mjs",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "e95b6e8217f3b2c0490fbf548c7873d948b39253"
+    },
+    {
+      "path": "images/controller.mjs",
+      "mode": "0644",
+      "size_bytes": 14379,
+      "sha256": "ea247de882e0a529530e08b9219c5ab266ec48f0a9575f4db202810653830572",
+      "source_path": "apps/directadmin/workforce/images/controller.mjs",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "4430c78f0c6d03cd874498f7bda62b4669213e9c"
+    },
+    {
+      "path": "images/presentation.mjs",
+      "mode": "0644",
+      "size_bytes": 4374,
+      "sha256": "b07eeb81bc3128ef62b7324aca7333a5c4ee25a57d46ad17a2a0c503dd0d7314",
+      "source_path": "apps/directadmin/workforce/images/presentation.mjs",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "0eb138a955c380fed7efec5ba250325b2c3fc4c5"
+    },
+    {
+      "path": "images/sdk.mjs",
+      "mode": "0644",
+      "size_bytes": 67327,
+      "sha256": "7c08d37f6ea274760f8e52092b2e86a07a93ae175fe4a6216df9156d1fc39681",
+      "generated_from": {
+        "repository": "Masterleeaus/Titan-Zero-Field-Service-Workforce",
+        "source_path": "packages/titan-platform/src/directadmin-plugin.ts",
+        "source_revision": "92856c4280a1fadc9c575fae48df36a51c4afb8c",
+        "source_sha256": "c4a45025347733e2d4a0735dc6b68c9e6335484da1b54967582bb0e34d561489",
+        "source_git_blob_oid": "c4c59c35019716718472f7b9eb01683b8d527852",
+        "source_git_object_format": "sha1"
+      },
+      "generation": {
+        "tool": "esbuild@0.28.1",
+        "tool_license": "MIT; build-only and not redistributed",
+        "lockfile": "pnpm-lock.yaml",
+        "lockfile_sha256": "0a10da0aaaf6c8d3df420326b9b1238debc1436e025670448623ab1093c76ad8",
+        "flags": [
+          "--bundle",
+          "--format=esm",
+          "--platform=browser",
+          "--target=es2022"
+        ],
+        "command": "node_modules/esbuild/bin/esbuild packages/titan-platform/src/directadmin-plugin.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=<temporary>/titan-directadmin-cockpit-sdk.mjs",
+        "working_directory": "repository root",
+        "output_sha256": "7c08d37f6ea274760f8e52092b2e86a07a93ae175fe4a6216df9156d1fc39681"
+      }
+    },
+    {
+      "path": "images/style.css",
+      "mode": "0644",
+      "size_bytes": 2828,
+      "sha256": "9f89975ae49344c0df099b59fa4ed680393fb6e2b34ba34e9cb60e8ca77d6f65",
+      "source_path": "apps/directadmin/workforce/images/style.css",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "fbffe6ab27edcce350bf086ddb59b953c268972f"
+    },
+    {
+      "path": "lib/directadmin-bootstrap-raw.mjs",
+      "mode": "0644",
+      "size_bytes": 17404,
+      "sha256": "e7eff7bfd6232006a6af44d4ece13a4d0f35984ed52db25569b7374999fa8882",
+      "source_path": "apps/directadmin/workforce/lib/directadmin-bootstrap-raw.mjs",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "23232d479d19dcfbccd6e3d6edcea8617c9f9eb1"
+    },
+    {
+      "path": "lib/entry.mjs",
+      "mode": "0644",
+      "size_bytes": 1497,
+      "sha256": "e7588c0e03029d9e4da27b8e53b06734893044640331c371afd9d4823b17d682",
+      "source_path": "apps/directadmin/workforce/lib/entry.mjs",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "81e9a481fb2ce78f054973763ebeba4ace471b72"
+    },
+    {
+      "path": "plugin.conf",
+      "mode": "0644",
+      "size_bytes": 64,
+      "sha256": "d38c70e7ec8f547371b437c95d74dce4fbddaf8aa3ab5dee01580c4a324ba04c",
+      "source_path": "apps/directadmin/workforce/plugin.conf",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "e8ca65581950d831389f5bafecc19d153b86f22a"
+    },
+    {
+      "path": "reseller/bootstrap-nonce.raw",
+      "mode": "0755",
+      "size_bytes": 692,
+      "sha256": "cd3e58a5ce2c1644e9063abdb294940992909c450529ab4940f03dc928a2adef",
+      "source_path": "apps/directadmin/workforce/reseller/bootstrap-nonce.raw",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "fad4819fd7419fc0493b0d03890bce2e4b75dbee"
+    },
+    {
+      "path": "reseller/bootstrap.raw",
+      "mode": "0755",
+      "size_bytes": 696,
+      "sha256": "75d44831d21a4026c11cfb6866b3d3f9f5a6132a0dcbad3a43b1dcc31c791fc2",
+      "source_path": "apps/directadmin/workforce/reseller/bootstrap.raw",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "57f35107825a5c79b307938089e295f6fcc39e58"
+    },
+    {
+      "path": "reseller/index.html",
+      "mode": "0755",
+      "size_bytes": 263,
+      "sha256": "17ac23339e45709c363dd8ff08f5d9c9966654e08306537ed7cd0ab4e16a9d20",
+      "source_path": "apps/directadmin/workforce/reseller/index.html",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "b436ed05e05c259e43f5e69aa48d9b7383a9c648"
+    },
+    {
+      "path": "scripts/install.sh",
+      "mode": "0755",
+      "size_bytes": 1840,
+      "sha256": "3a8467d2bc576bdd51a4cbe1e450779318e0d9a687eb58bddfbc51969ef8d598",
+      "source_path": "apps/directadmin/workforce/scripts/install.sh",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "ea622228b2b3e3158d69927014241bf4cb5c2566"
+    },
+    {
+      "path": "scripts/uninstall.sh",
+      "mode": "0755",
+      "size_bytes": 249,
+      "sha256": "b241d848707e56f923391a76ae59239b46a32692c090cce10e4c9daab118c3c5",
+      "source_path": "apps/directadmin/workforce/scripts/uninstall.sh",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "a7d5e67d817a7c314a7654a5355d2fb11fe772e4"
+    },
+    {
+      "path": "scripts/update.sh",
+      "mode": "0755",
+      "size_bytes": 104,
+      "sha256": "5555fe537a6729f30299ca947182daef73576c15cc36cefe21abb7c721c8ef51",
+      "source_path": "apps/directadmin/workforce/scripts/update.sh",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "ea2701470c89408dee3c1f3731e552c26397e19b"
+    },
+    {
+      "path": "user/bootstrap-nonce.raw",
+      "mode": "0755",
+      "size_bytes": 692,
+      "sha256": "cd3e58a5ce2c1644e9063abdb294940992909c450529ab4940f03dc928a2adef",
+      "source_path": "apps/directadmin/workforce/user/bootstrap-nonce.raw",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "fad4819fd7419fc0493b0d03890bce2e4b75dbee"
+    },
+    {
+      "path": "user/bootstrap.raw",
+      "mode": "0755",
+      "size_bytes": 696,
+      "sha256": "75d44831d21a4026c11cfb6866b3d3f9f5a6132a0dcbad3a43b1dcc31c791fc2",
+      "source_path": "apps/directadmin/workforce/user/bootstrap.raw",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "57f35107825a5c79b307938089e295f6fcc39e58"
+    },
+    {
+      "path": "user/index.html",
+      "mode": "0755",
+      "size_bytes": 259,
+      "sha256": "0b648ad0ff9fafb46e0a9abab4c55db427e4f08dec7a0c78c1bfc407701d1ea3",
+      "source_path": "apps/directadmin/workforce/user/index.html",
+      "source_revision": "097d3eaf480331c78443e89f4f57257b01d5c98c",
+      "source_git_blob": "7ecfbde5e24b7555fa78536919efe9ac082e1685"
+    }
+  ],
+  "verification": {
+    "sidecar_matches": true,
+    "all_regular_source_files_match_pinned_commit": true,
+    "unsafe_paths_symlinks_special_files": false,
+    "executable_modes_checked": true,
+    "sdk_bundle_rebuilt_to_same_sha256": true,
+    "current_pr_packaged_paths_unchanged_since_archive_pin": true
+  }
+}

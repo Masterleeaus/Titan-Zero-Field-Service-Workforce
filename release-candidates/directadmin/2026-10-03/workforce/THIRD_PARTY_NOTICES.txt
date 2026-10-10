@@ -1,0 +1,28 @@
+THIRD-PARTY NOTICES
+
+Artifact: titan-workforce-directadmin
+First-party SPDX: LicenseRef-TitanZero-Proprietary
+
+--- First-party license ---
+SPDX-License-Identifier: LicenseRef-TitanZero-Proprietary
+
+PROPRIETARY SOFTWARE — ALL RIGHTS RESERVED
+
+Artifact: Titan Workforce 0.1.6 (titan_workforce)
+Archive: titan_workforce.tar.gz
+SHA-256: 100ecd5c58d6de7f0cfb02636d58440ae05751293047d5cdce6bd61bcf556b26
+
+This artifact is proprietary. All rights in its contents remain with their respective rights holders. This repository publication and this notice do not grant a right or license to use, install, run, reproduce, modify, prepare derivative works from, distribute, publish, sublicense, or commercially exploit the artifact. Any permitted use requires separate written permission from the applicable rights holder(s).
+
+No license to any Titan, Titan Zero, DirectAdmin, or other name, logo, trademark, service mark, product identity, or trade dress is granted. This notice applies only to the exact installer archive identified above and does not license the repository, any other product, or third-party material.
+
+--- release-candidates/directadmin/2026-10-03/workforce/COMPONENT-NOTICES.txt ---
+No third-party runtime library or source component is redistributed in this archive. The packaged `images/sdk.mjs` is a generated first-party bundle, not a copied source file. Its pinned input is `packages/titan-platform/src/directadmin-plugin.ts` at commit `92856c4280a1fadc9c575fae48df36a51c4afb8c`, Git blob `c4c59c35019716718472f7b9eb01683b8d527852` (Git object format SHA-1), source SHA-256 `c4a45025347733e2d4a0735dc6b68c9e6335484da1b54967582bb0e34d561489`.
+
+The bundle was generated with build-only `esbuild@0.28.1` (MIT; not redistributed), pinned by `pnpm-lock.yaml` SHA-256 `0a10da0aaaf6c8d3df420326b9b1238debc1436e025670448623ab1093c76ad8`. Exact command and flags:
+
+`node_modules/esbuild/bin/esbuild packages/titan-platform/src/directadmin-plugin.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=<temporary>/titan-directadmin-cockpit-sdk.mjs`
+
+The generated `images/sdk.mjs` SHA-256 is `7c08d37f6ea274760f8e52092b2e86a07a93ae175fe4a6216df9156d1fc39681`; input pins, command, and output hash are recorded in `SOURCE-MANIFEST.json`. The outer portfolio orchestrator and the Workforce plugin packager are pinned separately there; the Workforce packager is from the exact 26-file source revision `097d3eaf480331c78443e89f4f57257b01d5c98c`.
+
+Workforce depends on the separate first-party Titan Server Node 0.3.0 archive by its exact SHA-256; that archive is not embedded here.

@@ -1,0 +1,1 @@
+No third-party runtime or source components are redistributed in this archive. It contains only the exact first-party package files listed in SOURCE-MANIFEST.json. Node.js built-ins and DirectAdmin/host system services and utilities are execution-environment interfaces, not packaged dependencies.
