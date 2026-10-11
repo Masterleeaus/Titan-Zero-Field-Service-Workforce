@@ -9,6 +9,8 @@ import {
 import {
   assertTitanNativeWorkforceBoundary,
   getTitanNativeWorkforceAgentMap,
+  resolveTitanNativeCleaningProfileBinding,
+  type TitanNativeCleaningProfileBinding,
   type TitanNativeWorkforceOperation,
 } from "./contracts.js";
 
@@ -36,6 +38,7 @@ export type TitanSchedulingPlanInput = Readonly<{
   candidates?: Array<Record<string, unknown>>;
   job?: Record<string, unknown>;
   traceId?: string;
+  cleaningProfileId?: string;
 }>;
 
 export type TitanSchedulingExecutionPlan = Readonly<{
@@ -45,6 +48,7 @@ export type TitanSchedulingExecutionPlan = Readonly<{
   actor_id: string;
   action: TitanSchedulingAction;
   operation: TitanNativeWorkforceOperation | null;
+  cleaning_profile_binding: TitanNativeCleaningProfileBinding | null;
   entity_id: string | null;
   query: Readonly<Record<string, string>>;
   body: Readonly<Record<string, unknown>> | null;
@@ -248,6 +252,8 @@ export function buildTitanSchedulingPlan(input: TitanSchedulingPlanInput): Titan
     throw new Error(`unsupported-scheduling-action:${String(exhaustive)}`);
   }
 
+  const cleaning_profile_binding = resolveTitanNativeCleaningProfileBinding("scheduling", input.cleaningProfileId, operation?.id ?? null);
+
   return Object.freeze({
     schema: "titan.zero.workforce-native.scheduling-plan/v1",
     agentKey: "scheduling",
@@ -255,6 +261,7 @@ export function buildTitanSchedulingPlan(input: TitanSchedulingPlanInput): Titan
     actor_id,
     action: input.action,
     operation,
+    cleaning_profile_binding,
     entity_id,
     query,
     body,

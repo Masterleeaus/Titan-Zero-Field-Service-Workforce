@@ -23,6 +23,8 @@ import {
 import {
   assertTitanNativeWorkforceBoundary,
   getTitanNativeWorkforceAgentMap,
+  resolveTitanNativeCleaningProfileBinding,
+  type TitanNativeCleaningProfileBinding,
   type TitanNativeWorkforceOperation,
 } from "./contracts.js";
 
@@ -56,6 +58,7 @@ export type TitanCustomerCarePlanInput = Readonly<{
   issueId?: string | null;
   traceId?: string | null;
   payload?: Readonly<Record<string, unknown>> | null;
+  cleaningProfileId?: string;
 }>;
 
 type JsonRecord = Readonly<Record<string, unknown>>;
@@ -150,6 +153,8 @@ export function buildTitanCustomerCarePlan(input: TitanCustomerCarePlanInput) {
     const exhaustive: never = input.action; throw new Error(`unsupported-customer-care-action:${String(exhaustive)}`);
   }
 
+  const cleaning_profile_binding = resolveTitanNativeCleaningProfileBinding("customer_care", input.cleaningProfileId, op?.id ?? null);
+
   return Object.freeze({
     schema: "titan.zero.workforce-native.customer-care-plan/v1",
     agentKey: "customer_care" as const,
@@ -157,6 +162,7 @@ export function buildTitanCustomerCarePlan(input: TitanCustomerCarePlanInput) {
     actor_id,
     action: input.action,
     operation: op,
+    cleaning_profile_binding,
     entity_id,
     property_id,
     issue_id,

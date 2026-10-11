@@ -8,6 +8,8 @@ import {
 import {
   assertTitanNativeWorkforceBoundary,
   getTitanNativeWorkforceAgentMap,
+  resolveTitanNativeCleaningProfileBinding,
+  type TitanNativeCleaningProfileBinding,
   type TitanNativeWorkforceOperation,
 } from "./contracts.js";
 
@@ -31,6 +33,7 @@ export type TitanReceptionPlanInput = Readonly<{
   traceId?: string;
   correlationId?: string;
   causationId?: string;
+  cleaningProfileId?: string;
 }>;
 
 export type TitanReceptionExecutionPlan = Readonly<{
@@ -40,6 +43,7 @@ export type TitanReceptionExecutionPlan = Readonly<{
   actor_id: string;
   action: TitanReceptionAction;
   operation: TitanNativeWorkforceOperation | null;
+  cleaning_profile_binding: TitanNativeCleaningProfileBinding | null;
   query: Readonly<Record<string, string>>;
   body: Readonly<Record<string, unknown>> | null;
   handoff: unknown | null;
@@ -138,6 +142,8 @@ export function buildTitanReceptionPlan(input: TitanReceptionPlanInput): TitanRe
     throw new Error(`unsupported-reception-action:${String(exhaustive)}`);
   }
 
+  const cleaning_profile_binding = resolveTitanNativeCleaningProfileBinding("reception", input.cleaningProfileId, operation?.id ?? null);
+
   return Object.freeze({
     schema: "titan.zero.workforce-native.reception-plan/v1",
     agentKey: "reception",
@@ -145,6 +151,7 @@ export function buildTitanReceptionPlan(input: TitanReceptionPlanInput): TitanRe
     actor_id,
     action: input.action,
     operation,
+    cleaning_profile_binding,
     query,
     body,
     handoff,
