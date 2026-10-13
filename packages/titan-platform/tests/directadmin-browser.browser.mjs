@@ -1,14 +1,138 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, realpath, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, extname, isAbsolute, join, relative as pathRelative, resolve as pathResolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:https';
 import { once } from 'node:events';
 import { chromium } from '@playwright/test';
+import ts from 'typescript';
 import { fixture, csrf } from './fixtures/directadmin-bridge-fixture.mjs';
 import { createDirectAdminGateway } from '../.test-dist/directadmin-plugin.js';
+
+const PLATFORM_MODULE_PREFIX = '/packages/titan-platform/src/';
+const DIRECTADMIN_APP_PREFIX = '/apps/directadmin/';
+
+function assertInsideDirectory(root, candidate, description) {
+  const relativePath = pathRelative(root, candidate);
+  if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+    throw new Error(`${description} escapes the compiled test output`);
+  }
+  return relativePath;
+}
+
+function collectModuleSpecifiers(modulePath, source) {
+  const parsed = ts.createSourceFile(modulePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const specifiers = [];
+  const visit = node => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
+      if (!ts.isStringLiteralLike(node.moduleSpecifier)) throw new Error(`Non-literal module specifier in ${modulePath}`);
+      specifiers.push(node.moduleSpecifier.text);
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const [argument] = node.arguments;
+      if (!argument || !ts.isStringLiteralLike(argument)) throw new Error(`Non-literal dynamic import in ${modulePath}`);
+      specifiers.push(argument.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return specifiers;
+}
+
+async function buildBrowserFixtureAssets() {
+  const outputRoot = await realpath(fileURLToPath(new URL('../.test-dist/', import.meta.url)));
+  const pending = ['directadmin-plugin.js', 'brand-publication.js'];
+  const assets = new Map();
+
+  while (pending.length) {
+    const modulePath = pending.pop();
+    const resolvedPath = pathResolve(outputRoot, modulePath);
+    assertInsideDirectory(outputRoot, resolvedPath, `Module ${modulePath}`);
+    const realPath = await realpath(resolvedPath);
+    assertInsideDirectory(outputRoot, realPath, `Module ${modulePath}`);
+    const relativePath = pathRelative(outputRoot, resolvedPath).split(sep).join('/');
+    const assetPath = `${PLATFORM_MODULE_PREFIX}${relativePath}`;
+    if (assets.has(assetPath)) continue;
+
+    const content = await readFile(realPath, 'utf8');
+    const extension = extname(relativePath);
+    if (extension !== '.js' && extension !== '.json') throw new Error(`Unsupported browser dependency: ${relativePath}`);
+    assets.set(assetPath, {
+      body: content,
+      contentType: extension === '.json' ? 'application/json; charset=utf-8' : 'text/javascript; charset=utf-8',
+    });
+
+    if (extension !== '.js') continue;
+    for (const specifier of collectModuleSpecifiers(relativePath, content)) {
+      if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
+        throw new Error(`Browser dependency must be relative: ${relativePath} -> ${specifier}`);
+      }
+      if (specifier.includes('\\') || specifier.includes('?') || specifier.includes('#')) {
+        throw new Error(`Unsupported browser dependency specifier: ${relativePath} -> ${specifier}`);
+      }
+      const dependency = pathResolve(dirname(resolvedPath), specifier);
+      const dependencyPath = assertInsideDirectory(outputRoot, dependency, `Import ${relativePath} -> ${specifier}`);
+      if (extname(dependencyPath) !== '.js' && extname(dependencyPath) !== '.json') {
+        throw new Error(`Unsupported browser dependency: ${relativePath} -> ${specifier}`);
+      }
+      pending.push(dependencyPath.split(sep).join('/'));
+    }
+  }
+
+  for (const [assetPath, file] of [
+    [`${DIRECTADMIN_APP_PREFIX}zero-core/cockpit.mjs`, new URL('../../../apps/directadmin/zero-core/cockpit.mjs', import.meta.url)],
+    [`${DIRECTADMIN_APP_PREFIX}operations-hub/cockpit.mjs`, new URL('../../../apps/directadmin/operations-hub/cockpit.mjs', import.meta.url)],
+    [`${DIRECTADMIN_APP_PREFIX}brand-studio/cockpit.mjs`, new URL('../../../apps/directadmin/brand-studio/cockpit.mjs', import.meta.url)],
+  ]) {
+    assets.set(assetPath, { body: await readFile(file, 'utf8'), contentType: 'text/javascript; charset=utf-8' });
+  }
+  return assets;
+}
+
+let browserFixtureAssetsPromise;
+function browserFixtureAssets() {
+  browserFixtureAssetsPromise ??= buildBrowserFixtureAssets();
+  return browserFixtureAssetsPromise;
+}
+
+function resolveBrowserFixtureAsset(requestTarget, assets) {
+  const queryStart = requestTarget.indexOf('?');
+  const pathname = queryStart < 0 ? requestTarget : requestTarget.slice(0, queryStart);
+  const inAssetNamespace = pathname === '/packages/titan-platform/src' || pathname.startsWith(PLATFORM_MODULE_PREFIX) ||
+    pathname === '/apps/directadmin' || pathname.startsWith(DIRECTADMIN_APP_PREFIX);
+  if (!inAssetNamespace) return { handled: false, status: 404 };
+
+  const segments = pathname.split('/');
+  if (pathname.includes('\\') || pathname.includes('%') || segments.some(segment => segment === '.' || segment === '..')) {
+    return { handled: true, status: 400 };
+  }
+  const asset = assets.get(pathname);
+  return asset ? { handled: true, status: 200, ...asset } : { handled: true, status: 404 };
+}
+
+test('browser fixture serves only the compiled consumer dependency closure', async () => {
+  const assets = await browserFixtureAssets();
+  for (const path of [
+    `${PLATFORM_MODULE_PREFIX}directadmin-plugin.js`,
+    `${PLATFORM_MODULE_PREFIX}brand-publication.js`,
+    `${PLATFORM_MODULE_PREFIX}titan-builder/index.js`,
+    `${PLATFORM_MODULE_PREFIX}titan-builder/security-gate.js`,
+    `${PLATFORM_MODULE_PREFIX}ported/titan-runtime/interaction-engine/presentation-intent.js`,
+    `${PLATFORM_MODULE_PREFIX}ported/titan-runtime/interface-runtime/index.js`,
+    `${PLATFORM_MODULE_PREFIX}ported/titan-runtime/visual-runtime/index.js`,
+  ]) assert.equal(resolveBrowserFixtureAsset(path, assets).status, 200, `compiled dependency missing: ${path}`);
+  assert.equal(resolveBrowserFixtureAsset(`${PLATFORM_MODULE_PREFIX}titan-builder/catalog.json`, assets).contentType,
+    'application/json; charset=utf-8');
+  assert.equal(resolveBrowserFixtureAsset(`${PLATFORM_MODULE_PREFIX}brand-publication.js?cache=1`, assets).status, 200);
+  assert.equal(resolveBrowserFixtureAsset(`${PLATFORM_MODULE_PREFIX}unlisted.js`, assets).status, 404);
+  assert.equal(resolveBrowserFixtureAsset(`${PLATFORM_MODULE_PREFIX}titan-builder/../directadmin-plugin.js`, assets).status, 400);
+  assert.equal(resolveBrowserFixtureAsset(`${PLATFORM_MODULE_PREFIX}%2e%2e/directadmin-plugin.js`, assets).status, 400);
+  assert.equal(resolveBrowserFixtureAsset(`${PLATFORM_MODULE_PREFIX}titan-builder\\index.js`, assets).status, 400);
+  assert.equal(resolveBrowserFixtureAsset(`${DIRECTADMIN_APP_PREFIX}brand-studio/../zero-core/cockpit.mjs`, assets).status, 400);
+});
 
 // Explicit browser suite. Ephemeral loopback TLS material is deleted after the
 // test; no system trust store, user server, production key or setting is changed.
@@ -36,13 +160,19 @@ test('Chromium: real consumers, cookie flags, browser CSRF headers, safe renderi
       } catch (error) { window.bootstrapError = error.message; return false; }
     };
     await window.connectCockpit();`;
+  const assets = await browserFixtureAssets();
   const server = createServer({ key: await readFile(key), cert: await readFile(cert) }, async (incoming, outgoing) => {
-    const path = new URL(incoming.url, origin).pathname;
     const send = (contentType, body, status = 200) => {
       outgoing.writeHead(status, { 'content-type': contentType, 'cache-control': 'no-store',
         'content-security-policy': "default-src 'self'; frame-ancestors 'self'; base-uri 'none'" }); outgoing.end(body);
     };
     try {
+      const asset = resolveBrowserFixtureAsset(incoming.url, assets);
+      if (asset.handled) {
+        if (asset.status !== 200) return send('text/plain', asset.status === 400 ? 'unsafe fixture asset path' : 'fixture route not found', asset.status);
+        return send(asset.contentType, asset.body);
+      }
+      const path = new URL(incoming.url, origin).pathname;
       if (path.startsWith('/v1/')) {
         const headers = incoming.headers; const record = { path, method: incoming.method, headers }; observed.push(record);
         const chunks = []; for await (const chunk of incoming) chunks.push(chunk);
@@ -50,6 +180,7 @@ test('Chromium: real consumers, cookie flags, browser CSRF headers, safe renderi
         record.body = body.toString('utf8');
         const response = await gateway(new Request(`${origin}${incoming.url}`, { method: incoming.method, headers,
           ...(incoming.method === 'POST' ? { body } : {}) }));
+        record.responseStatus = response.status;
         outgoing.writeHead(response.status, Object.fromEntries(response.headers)); outgoing.end(await response.text()); return;
       }
       if (path === '/test/cockpit') {
@@ -57,10 +188,6 @@ test('Chromium: real consumers, cookie flags, browser CSRF headers, safe renderi
         return send('text/html', `<meta name="titan-directadmin-csrf" content="${nonce}"><!doctype html><title>SDK browser fixture</title><section id="zero"></section><section id="ops"></section><section id="brand"></section><script type="module" src="/test/bootstrap.js"></script>`);
       }
       if (path === '/test/bootstrap.js') return send('text/javascript', entry);
-      const platform = /^\/packages\/titan-platform\/src\/([a-z-]+\.js)$/.exec(path);
-      const consumer = /^\/apps\/directadmin\/(zero-core|operations-hub|brand-studio)\/cockpit\.mjs$/.exec(path);
-      if (platform) return send('text/javascript', await readFile(new URL(`../.test-dist/${platform[1]}`, import.meta.url), 'utf8'));
-      if (consumer) return send('text/javascript', await readFile(new URL(`../../../apps/directadmin/${consumer[1]}/cockpit.mjs`, import.meta.url), 'utf8'));
       return send('text/plain', 'fixture route not found', 404);
     } catch (error) { serverErrors.push(error instanceof Error ? error.message : 'unknown'); return send('text/plain', 'fixture unavailable', 500); }
   });
@@ -133,14 +260,27 @@ test('Chromium: real consumers, cookie flags, browser CSRF headers, safe renderi
   assert.equal(await page.locator('#zero [role="status"]').getAttribute('aria-live'), 'polite');
 
   const original = f.owners.projection;
+  let brandProjectionCalls = 0;
   f.owners.projection = async (plugin, current) => {
+    if (plugin === 'titan_web') brandProjectionCalls++;
     const result = await original(plugin, current);
     if (plugin === 'titan_web') return { ...result, source: '<img src=x onerror="window.injected=true">',
-      data: { ...result.data, publication_id: '<script>window.injected=true</script>' } };
+      data: { ...result.data, publications: result.data.publications.map((publication, index) => index === 0
+        ? { ...publication, publication_id: '<script>window.injected=true</script>' } : publication) } };
     return result;
   };
   await page.locator('#brand button').click();
-  await page.waitForFunction(() => document.querySelector('#brand pre').textContent.includes('<img'));
+  try { await page.waitForFunction(() => document.querySelector('#brand pre').textContent.includes('<img') &&
+    document.querySelector('#brand [role="status"]').textContent.includes('<script>')); }
+  catch {
+    const brandView = await page.locator('#brand').evaluate(root => ({
+      state: root.dataset.state,
+      status: root.querySelector('[role="status"]')?.textContent ?? '',
+      evidence: root.querySelector('pre')?.textContent ?? '',
+    }));
+    throw new Error(`Brand projection did not expose the text-rendering input: ownerCalls=${brandProjectionCalls}; view=${JSON.stringify(brandView)}; responses=${JSON.stringify(observed.map(record => ({ method: record.method, path: record.path, status: record.responseStatus })))}; page=${errors.join('; ')}; console=${consoleErrors.join('; ')}; failed=${failedRequests.join('; ')}; server=${serverErrors.join('; ')}`);
+  }
+  assert.match(await page.locator('#brand [role="status"]').innerText(), /<script>window\.injected=true<\/script>/);
   assert.equal(await page.locator('#brand img, #brand script').count(), 0);
   assert.equal(await page.evaluate(() => window.injected), undefined);
 
