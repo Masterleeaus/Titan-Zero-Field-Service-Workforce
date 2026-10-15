@@ -14,6 +14,13 @@ const OFFICE_ROOT = "/app";
 const FIELD_ROOT = "/app/my-work";
 export const CAPTURE_PATH = "/app/capture";
 
+function loginHref(reason: "signin-required" | "session-expired", pathname: string | null | undefined): string {
+  const params = new URLSearchParams({ reason });
+  const allowedNext = allowlistedPostLoginNext(pathname);
+  if (allowedNext) params.set("next", allowedNext);
+  return `/login?${params.toString()}`;
+}
+
 /** Reuse the canonical same-origin, reachable-page navigation allowlist. */
 export function allowlistedPostLoginNext(
   next: string | null | undefined,
@@ -22,7 +29,12 @@ export function allowlistedPostLoginNext(
 }
 
 export function loginRedirectForPath(pathname: string | null | undefined): string {
-  return pathname === CAPTURE_PATH ? `/login?next=${CAPTURE_PATH}` : "/login";
+  return loginHref("signin-required", pathname);
+}
+
+/** Use only after a server-verified session's bounded lifetime elapsed. */
+export function expiredSessionLoginRedirectForPath(pathname: string | null | undefined): string {
+  return loginHref("session-expired", pathname);
 }
 
 export function pathnameFromHeaders(headerList: {

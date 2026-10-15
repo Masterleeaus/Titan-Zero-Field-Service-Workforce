@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { query, queryOne } from "@/lib/db";
 import { withDbSession } from "@/lib/db";
+import { withTenantTransaction } from "@/lib/db/portable";
 import { loadSquareSettings } from "@/lib/integrations/square-payments";
 import { isEncryptionConfigured } from "@/lib/crypto";
 import { PageContainer, PageHeader, SurfaceState } from "@/components/ui";
@@ -12,6 +13,7 @@ import type { LocationDayValues } from "./LocationDaySettings";
 import { bindNativeSurface } from "@/lib/navigation/native-service-bindings";
 import { loadWorkforceLifecycleInspection } from "./workforce-lifecycle-data";
 import { loadWorkforceHierarchyInspection } from "./workforce-hierarchy-data";
+import { loadCompanyMemberDirectory } from "@/lib/workforce/member-directory";
 
 export const dynamic = "force-dynamic";
 
@@ -70,15 +72,22 @@ export default async function SettingsPage() {
         )
       : null,
     isAdmin
-      ? query<UserRow>(
-          `SELECT id, full_name, email, phone, role, created_at FROM users WHERE account_id = $1 ORDER BY role, full_name`,
-          [session.accountId]
-        )
+      ? withTenantTransaction(session, async (client, accountId) => {
+          return (await loadCompanyMemberDirectory(client, accountId)).map(({ id, full_name, email, phone, role, created_at }) => ({
+            id, full_name, email, phone, role, created_at,
+          }));
+        })
       : [],
-    queryOne<UserRow>(
-      `SELECT id, full_name, email, phone, role FROM users WHERE id = $1`,
-      [session.userId]
-    ),
+    withTenantTransaction(session, async (client, accountId) => {
+      const { rows } = await client.query<UserRow>(
+        `SELECT u.id, u.full_name, u.email, u.phone, bm.role, u.created_at
+           FROM business_memberships bm
+           JOIN users u ON u.id = bm.user_id
+          WHERE bm.account_id = $1 AND bm.user_id = $2 AND bm.status = 'active'`,
+        [accountId, session.userId],
+      );
+      return rows[0] ?? null;
+    }),
   ]);
 
   if (!me) redirect("/login");

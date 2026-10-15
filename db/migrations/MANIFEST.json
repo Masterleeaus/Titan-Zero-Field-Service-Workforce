@@ -1432,6 +1432,20 @@
       "filename": "189_audit_log_nullable_actor.sql",
       "prefix": "189",
       "sha256": "d612dbb4d11dad8eccb177c8e4e0b68a49e03fea97fb12849a130561815d52b6"
+    },
+    {
+      "sequence": 205,
+      "migration_id": "db/migrations/190_workforce_six_table_rls_parent_integrity.sql",
+      "filename": "190_workforce_six_table_rls_parent_integrity.sql",
+      "prefix": "190",
+      "sha256": "3c21989f384323f3dedf3597e1ac482944186952f25412e218bd09850bfe9f9b"
+    },
+    {
+      "filename": "191_company_member_directory.sql",
+      "prefix": "191",
+      "sequence": 206,
+      "migration_id": "db/migrations/191_company_member_directory.sql",
+      "sha256": "f38776952c8394d00876be2547cb0f806b056b94970ee48456ec4c48bcac5e8d"
     }
   ],
   "prefix_collisions": [

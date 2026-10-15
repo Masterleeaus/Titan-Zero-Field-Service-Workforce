@@ -1,10 +1,10 @@
-import { portableQuery } from "@/lib/db/portable";
+import type { DbClient } from "@/lib/db-contract";
 import { buildFullAddress } from "@/lib/travel/distance";
 import { buildDispatchRouteLegs, type DispatchRouteReadiness } from "./routing";
 import { availableMinutesInRange, loadAvailabilityForAccount, type AvailabilityWindow } from "@/lib/workforce/availability";
 import { loadTechnicianSkills, type TechnicianSkill } from "@/lib/workforce/skills";
-import { withPortableTransaction } from "@/lib/db/portable";
 import { loadCurrentVehicleAssignments } from "@/lib/workforce/vehicle-assignment";
+import { loadCompanyMemberDirectory } from "@/lib/workforce/member-directory";
 
 export interface DispatchTechnicianCapacity {
   userId: string;
@@ -115,30 +115,23 @@ export function buildCapacity(
   }).sort((a, b) => a.utilizationPct - b.utilizationPct || a.name.localeCompare(b.name));
 }
 
-export async function loadDispatchBoard(accountId: string, rangeStart: Date, rangeEnd: Date) {
-  const technicians = await portableQuery<DbTech>(
-    `SELECT u.id, u.full_name, u.email
-       FROM business_memberships bm
-       JOIN users u ON u.id = bm.user_id AND u.account_id = bm.account_id
-      WHERE bm.account_id = $1
-        AND bm.status = 'active'
-        AND bm.role IN ('tech','admin','owner')
-      ORDER BY u.full_name ASC, u.email ASC`,
-    [accountId],
-  );
+export async function loadDispatchBoard(client: DbClient, accountId: string, rangeStart: Date, rangeEnd: Date) {
+  const technicians: DbTech[] = (await loadCompanyMemberDirectory(client, accountId))
+    .map(({ id, full_name, email }) => ({ id, full_name, email }));
   const [availability, skillsByUser, vehicleAssignments] = await Promise.all([
-    loadAvailabilityForAccount(accountId),
-    loadTechnicianSkills(accountId),
-    withPortableTransaction((client) => loadCurrentVehicleAssignments(client, accountId)),
+    loadAvailabilityForAccount(client, accountId),
+    loadTechnicianSkills(client, accountId),
+    loadCurrentVehicleAssignments(client, accountId),
   ]);
   const vehiclesByUser = new Map(vehicleAssignments.map((assignment) => [assignment.userId, { id: assignment.vehicleId, name: assignment.vehicleName, plate: assignment.plate }]));
 
-  const fieldVehicles = await portableQuery<Record<string, unknown> & { id: string; nickname: string; plate: string | null }>(
+  const fieldVehiclesResult = await client.query<Record<string, unknown> & { id: string; nickname: string; plate: string | null }>(
     `SELECT id, nickname, plate FROM vehicles WHERE account_id = $1 AND is_active = true AND kind <> 'trailer' ORDER BY nickname ASC`,
     [accountId],
   );
+  const fieldVehicles = fieldVehiclesResult.rows;
 
-  const visits = await portableQuery<DbVisit>(
+  const visitsResult = await client.query<DbVisit>(
     `SELECT v.id, v.job_id, v.work_order_id, v.assigned_user_id,
             v.scheduled_start, v.scheduled_end, v.status,
             j.title AS job_title, c.name AS client_name,
@@ -153,7 +146,7 @@ export async function loadDispatchBoard(accountId: string, rangeStart: Date, ran
        LEFT JOIN properties p ON p.id = j.property_id AND p.account_id = v.account_id
        LEFT JOIN work_orders wo ON wo.id = v.work_order_id AND wo.account_id = v.account_id
        LEFT JOIN travel_calculation_snapshots ts ON ts.id = COALESCE(v.travel_snapshot_id, wo.travel_snapshot_id) AND ts.account_id = v.account_id
-       LEFT JOIN users u ON u.id = v.assigned_user_id AND u.account_id = v.account_id
+       LEFT JOIN users u ON u.id = v.assigned_user_id
       WHERE v.account_id = $1
         AND v.scheduled_start >= $2
         AND v.scheduled_start < $3
@@ -161,6 +154,7 @@ export async function loadDispatchBoard(accountId: string, rangeStart: Date, ran
       ORDER BY v.scheduled_start ASC`,
     [accountId, rangeStart.toISOString(), rangeEnd.toISOString()],
   );
+  const visits = visitsResult.rows;
 
   const planningDays = Math.max(1, Math.round((rangeEnd.getTime() - rangeStart.getTime()) / 86_400_000));
   const normalized = visits.map((visit) => ({

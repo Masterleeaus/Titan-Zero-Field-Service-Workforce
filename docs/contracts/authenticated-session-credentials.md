@@ -151,12 +151,84 @@ sanitized `identity-registry-unavailable` error is preserved so route handlers
 can report temporary server unavailability instead of turning a registry outage
 into an authentication redirect; no backend details or credential data escape.
 
-This is an injectable ingress contract, not a production cutover. Current web
-login still issues the legacy `fsm_session`; no production web verifier instance,
-trusted upstream issuer, GLOBAL_REGISTRY connection, or canonical cookie issuer
-is configured in `apps/web`. The ingress therefore remains unavailable until an
-existing trusted server composition supplies those dependencies; failure returns
-no current web session and never falls back to the legacy cookie.
+The injectable ingress above is now composed by
+`apps/web/lib/auth/web-session-runtime.ts` for the real password-login and cookie
+session path. The production factory is configuration-gated and requires:
+
+- `TITAN_WEB_PUBLIC_ORIGIN`: one canonical HTTPS origin, never request `Host` or
+  forwarded headers. It derives separate issuers
+  `titan:web-login:<origin>` and `titan:web-session:<origin>`.
+- `TITAN_WEB_IDENTITY_REGISTRY_PATH`: an absolute path to an already existing
+  `GLOBAL_REGISTRY` SQLite file with the commissioned security schema v1. Startup
+  calls the read-only schema opener; it does not run migrations or backfill.
+- `TITAN_WEB_LOGIN_KEY_ID` / `TITAN_WEB_LOGIN_SIGNING_SECRET` and
+  `TITAN_WEB_SESSION_KEY_ID` / `TITAN_WEB_SESSION_SIGNING_SECRET`: distinct key
+  IDs and distinct base64url secrets of at least 32 bytes, supplied by existing
+  server secret configuration. Login assertions use audience `titan-web-login`;
+  canonical web sessions use `titan-web`. These issuer, audience and key
+  namespaces are independent of DirectAdmin.
+- `TITAN_WEB_IDENTITY_BINDINGS_JSON`: an explicit array of rows with exactly
+  `legacy_user_id`, `legacy_account_id`, `company_id`, `actor_id`, and `device_id`.
+  Each row is an approved web compatibility mapping. Matching active actor,
+  company, membership, device, and external-binding records must already exist
+  in GLOBAL_REGISTRY; web startup/login creates none of them. A user who lacks a
+  mapping is denied until the identity owner provisions one from authoritative
+  evidence. Historical users are never blanket backfilled.
+
+After bcrypt verifies the password, the server signs a one-use login assertion
+for the configured web-login issuer and immediately exchanges it through the
+canonical service. The assertion binds the mapped stable subject, selected
+company, device, audience and expiry; the registry binds its issuer-scoped nonce
+to the durable session ID. The assertion never comes from the browser. The
+resulting session is signed by the separately configured web-session key and
+lasts at most five minutes. Login never trusts the legacy stored role; the role
+is projected from the current canonical membership. `getSession` reads only the
+canonical cookie and `GLOBAL_REGISTRY`; it no longer queries `business_memberships`
+before PostgreSQL tenant context or falls back to `fsm_session`. Logout revokes
+the current durable session before deleting the canonical and legacy cookies.
+
+`switchCompanyCredential(credential, targetCompanyId)` verifies the current
+credential first, derives source actor/company/device/revisions from that
+verified context, then delegates to the canonical atomic switch operation. The
+registry must already authorize the selected destination. The returned
+operation scope remains exactly `[targetCompanyId]`; the full company-choice
+list is not a business-operation scope. The destination must also have an
+explicit web account/user projection row for the same verified stable subject;
+a registry membership without that exact row is rejected before the switch
+mutates session state. Provisioning and user
+management routes remain behind this current verified session and
+registry-derived role. Legacy user CRUD never creates or backfills canonical
+identity/access records. The explicitly mapped owner-only membership mutation
+path is the bounded exception: it extracts the configured web-session cookie,
+verifies it, derives the owner’s selected company from the current registry
+context, resolves the target only through an approved web identity binding, and
+then updates an already-existing membership through GLOBAL_REGISTRY. The
+registry checks that the same current session is still an active owner and
+performs the target membership revision compare-and-set in one transaction.
+Caller-supplied actor, company, session, or role claims are not bearer authority.
+
+For a legacy role/status mutation, the web route first writes a restrictive
+canonical role/status floor inside its still-open PostgreSQL transaction. A
+registry failure aborts that PostgreSQL transaction. The floor is the least
+privileged role among the current canonical role, the observed legacy role,
+and the requested role; inactive canonical or legacy status is preserved.
+After the PostgreSQL commit, the route may raise the existing canonical role to
+the requested role using another owner-checked revision compare-and-set. Until
+that succeeds, access remains at the lower role and the route returns a
+sanitized retryable error. A failed PostgreSQL commit after the registry floor
+leaves the canonical membership more restrictive; retrying the requested
+change is safe. Every write is scoped to the owner’s currently selected
+company, increments the canonical membership generation (staling existing
+cookies), preserves other company memberships, and never creates a missing
+canonical identity or membership. An already inactive canonical membership is
+never reactivated by a role edit.
+
+When required configuration is absent or the registry schema is not already
+commissioned, login and authenticated routes fail with a safe
+`WEB_AUTH_SETUP_REQUIRED` 503 and the relevant setting names. Registry failures
+return a sanitized 503. Source implementation is separate from operator
+commissioning: no live key, identity, device, membership, migration, or access
+change was performed here.
 
 ## DirectAdmin → Workforce/Zero exchange
 

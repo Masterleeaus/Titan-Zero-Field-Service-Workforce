@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { resolvePostLoginHref } from "@/lib/auth/post-login-destination";
 
 export default function LoginPage() {
@@ -8,6 +8,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loginNotice, setLoginNotice] = useState<"signin-required" | "session-expired" | null>(null);
+
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    if (reason === "signin-required" || reason === "session-expired") setLoginNotice(reason);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -60,6 +66,18 @@ export default function LoginPage() {
       <div className="login-card">
         <h1>Titan Zero</h1>
         <p>Sign in to your account</p>
+
+        <p className="web-session-duration-note">
+          For your security, web sessions last up to five minutes. Sign in again when your session expires.
+        </p>
+
+        {loginNotice && (
+          <div className="web-session-login-notice" role="status">
+            {loginNotice === "session-expired"
+              ? "Your secure sign-in expired. Sign in again to continue."
+              : "Sign in to continue."}
+          </div>
+        )}
 
         {error && (
           <div className="error-message" role="alert">

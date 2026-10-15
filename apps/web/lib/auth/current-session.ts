@@ -21,6 +21,9 @@ export interface WebSessionProjection {
   /** Trusted server resolver over approved company/account mappings. Never infer
    * equality or create a mapping when no approved compatibility binding exists. */
   resolveLegacyAccountId(company_id: string): Promise<string | null>;
+  /** Production composition supplies an approved actor-to-legacy-user mapping.
+   * Omitted only by existing canonical consumers that use actor_id directly. */
+  resolveLegacyUserId?(actor_id: string, company_id: string, subject: string): Promise<string | null>;
 }
 
 export interface CurrentWebSession {
@@ -48,7 +51,7 @@ function authenticatedCompanyScope(context: CurrentSessionContext): VerifiedComp
   });
 }
 
-async function project(context: CurrentSessionContext, resolveLegacyAccountId: WebSessionProjection["resolveLegacyAccountId"], revalidate: () => Promise<CurrentSessionContext>): Promise<CurrentWebSession> {
+async function project(context: CurrentSessionContext, subject: string, resolveLegacyAccountId: WebSessionProjection["resolveLegacyAccountId"], resolveLegacyUserId: WebSessionProjection["resolveLegacyUserId"], revalidate: () => Promise<CurrentSessionContext>): Promise<CurrentWebSession> {
   let accountId: string;
   try {
     const mapped = await resolveLegacyAccountId(context.company_id);
@@ -58,6 +61,17 @@ async function project(context: CurrentSessionContext, resolveLegacyAccountId: W
   } catch {
     throw new Error("web-session-account-mapping-unavailable");
   }
+  let userId = context.actor_id;
+  if (resolveLegacyUserId) {
+    try {
+      const mapped = await resolveLegacyUserId(context.actor_id, context.company_id, subject);
+      if (typeof mapped !== "string") throw new Error("missing-mapping");
+      requireSecurityId(mapped, "user_id");
+      userId = mapped;
+    } catch {
+      throw new Error("web-session-user-mapping-unavailable");
+    }
+  }
   // Mapping may await storage/network I/O. Recheck the exact authenticated
   // generation after it completes so switch/revoke cannot yield stale identity.
   const current = await revalidate();
@@ -65,7 +79,7 @@ async function project(context: CurrentSessionContext, resolveLegacyAccountId: W
   if (!role.success) throw new Error("web-session-role-unsupported");
   return Object.freeze({
     session: Object.freeze({
-      userId: current.actor_id,
+      userId,
       accountId,
       role: role.data,
     }),
@@ -90,11 +104,22 @@ function credentialFromRequest(request: Pick<Request, "headers">): string | null
     if (separator < 0 || pair.slice(0, separator).trim() !== CURRENT_WEB_SESSION_COOKIE_NAME) continue;
     if (credential !== null) return null;
     const candidate = pair.slice(separator + 1).trim();
-    if (candidate.length > MAX_CREDENTIAL_LENGTH
-      || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(candidate)) return null;
+    if (!canonicalCredential(candidate)) return null;
     credential = candidate;
   }
   return credential;
+}
+
+/** Extracts only the bounded canonical bearer from the unique current-session
+ * cookie. Mutating request handlers should pass it straight to the canonical
+ * runtime; caller-supplied principal/session values are never accepted here. */
+export function currentWebSessionCredentialFromRequest(request: Pick<Request, "headers">): string | null {
+  return credentialFromRequest(request);
+}
+
+function canonicalCredential(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_CREDENTIAL_LENGTH
+    && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value);
 }
 
 function expectedFromCurrent(context: CurrentSessionContext): ExpectedContext {
@@ -120,31 +145,34 @@ export function createCurrentWebSessionIngress(verifier: CredentialVerifier, pro
   }
   if (typeof projection?.resolveLegacyAccountId !== "function") throw new Error("web-session-account-resolver-required");
   const resolveLegacyAccountId = projection.resolveLegacyAccountId.bind(projection);
+  const resolveLegacyUserId = projection.resolveLegacyUserId?.bind(projection);
 
-  async function resolveCredential(credential: string): Promise<CurrentWebSession> {
+  async function resolveCredential(credential: string): Promise<CurrentWebSession | null> {
+    if (!canonicalCredential(credential)) return null;
     // No request-provided expectation: authenticate verifies the signed claims
     // first, then resolves the selected company/device and current revisions.
-    const authenticated = await verifier.authenticate(credential);
-    const context = authenticated.context;
-    return project(context, resolveLegacyAccountId,
-      () => verifier.resolve(credential, expectedFromCurrent(context)));
+    try {
+      const authenticated = await verifier.authenticate(credential);
+      const context = authenticated.context;
+      return await project(context, authenticated.subject, resolveLegacyAccountId, resolveLegacyUserId,
+        () => verifier.resolve(credential, expectedFromCurrent(context)));
+    } catch (error) {
+      // Keep the verifier's sanitized availability signal distinct so a
+      // caller can return 503 instead of treating a registry outage as a
+      // bad login. All other credential/projection failures deny as null.
+      if (error instanceof Error && error.message === "identity-registry-unavailable") {
+        throw new Error("identity-registry-unavailable");
+      }
+      return null;
+    }
   }
 
   return Object.freeze({
+    resolveCredential,
     async resolveRequest(request: Pick<Request, "headers">): Promise<CurrentWebSession | null> {
       const credential = credentialFromRequest(request);
       if (!credential) return null;
-      try {
-        return await resolveCredential(credential);
-      } catch (error) {
-        // Keep the verifier's sanitized availability signal distinct so a
-        // caller can return 503 instead of treating a registry outage as a
-        // bad login. All other credential/projection failures deny as null.
-        if (error instanceof Error && error.message === "identity-registry-unavailable") {
-          throw new Error("identity-registry-unavailable");
-        }
-        return null;
-      }
+      return resolveCredential(credential);
     },
   });
 }
@@ -166,8 +194,11 @@ export function createCurrentWebSessionIngress(verifier: CredentialVerifier, pro
 export function createCurrentWebSessionAdapter(service: CredentialService, projection: WebSessionProjection) {
   if (typeof projection?.resolveLegacyAccountId !== "function") throw new Error("web-session-account-resolver-required");
   const resolveLegacyAccountId = projection.resolveLegacyAccountId.bind(projection);
-  function currentProjection(credential: string, context: CurrentSessionContext) {
-    return project(context, resolveLegacyAccountId, () => service.resolve(credential, {
+  const resolveLegacyUserId = projection.resolveLegacyUserId?.bind(projection);
+  async function currentProjection(credential: string, expectation: ExpectedContext) {
+    const authenticated = await service.authenticate(credential, expectation);
+    const context = authenticated.context;
+    return project(context, authenticated.subject, resolveLegacyAccountId, resolveLegacyUserId, () => service.resolve(credential, {
       company_id: context.company_id, device_id: context.device_id,
       actor_id: context.actor_id, context_revision: context.context_revision,
     }));
@@ -175,23 +206,26 @@ export function createCurrentWebSessionAdapter(service: CredentialService, proje
   return Object.freeze({
     async issue(upstreamCredential: string, expected: ExpectedContext) {
       const issued = await service.issue(upstreamCredential, expected);
-      return Object.freeze({ credential: issued.credential, ...await currentProjection(issued.credential, issued.context) });
+      return Object.freeze({ credential: issued.credential, credential_expires_at: issued.credential_expires_at,
+        ...await currentProjection(issued.credential, expected) });
     },
     async resolve(credential: string, expected: ExpectedContext): Promise<CurrentWebSession> {
-      return currentProjection(credential, await service.resolve(credential, expected));
+      return currentProjection(credential, expected);
     },
     /** Request-auth convenience: missing, legacy, stale and invalid tokens deny. */
     async getSession(credential: string | null | undefined, expected: ExpectedContext): Promise<Readonly<SessionPayload> | null> {
       if (!credential) return null;
       try {
-        return (await currentProjection(credential, await service.resolve(credential, expected))).session;
+        return (await currentProjection(credential, expected)).session;
       } catch {
         return null;
       }
     },
     async switchCompany(credential: string, expected: ExpectedContext, targetCompany: string) {
       const switched = await service.switchCompany(credential, expected, targetCompany);
-      return Object.freeze({ credential: switched.credential, ...await currentProjection(switched.credential, switched.context) });
+      const switchedExpected = expectedFromCurrent(switched.context);
+      return Object.freeze({ credential: switched.credential, credential_expires_at: switched.credential_expires_at,
+        ...await currentProjection(switched.credential, switchedExpected) });
     },
     async revoke(credential: string, expected: ExpectedContext): Promise<void> {
       await service.revoke(credential, expected);

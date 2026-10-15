@@ -15,7 +15,13 @@ const readMigration = (filename) => fs.readFileSync(path.join(migrationDir, file
 test("the checked-in manifest freezes the full ordered file set and exact bytes", () => {
   const result = validateMigrationManifest(manifest, filenames, readMigration);
   assert.equal(result.ok, true, result.errors.join("; "));
-  assert.equal(manifest.entries.length, 204);
+  const registeredMigrations = filenames.filter((filename) => filename.endsWith(".sql") && !filename.includes("seed"));
+  assert.equal(manifest.entries.length, registeredMigrations.length);
+  const workforceRls = manifest.entries.find(
+    (entry) => entry.filename === "190_workforce_six_table_rls_parent_integrity.sql",
+  );
+  assert.ok(workforceRls, "the registered Workforce RLS migration must remain in the immutable manifest");
+  assert.equal(workforceRls.sequence, 205);
   assert.equal(result.unverifiedHistoryPrefixes.length, 16);
   assert.ok(manifest.entries.every((entry, index) => entry.sequence === index + 1));
 });

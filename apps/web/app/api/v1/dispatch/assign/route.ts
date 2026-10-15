@@ -3,7 +3,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { withAuth } from "@/lib/auth/middleware";
 import type { AuthSession } from "@/lib/auth/middleware";
-import { withPortableTransaction } from "@/lib/db/portable";
+import { withTenantTransaction } from "@/lib/db/portable";
 import { appendAuditLog } from "@/lib/db/audit";
 import { getVisitScheduleConflicts } from "@/lib/scheduling/visit-conflicts";
 import { logger } from "@/lib/logger";
@@ -37,13 +37,13 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
   }
 
   try {
-    const data = await withPortableTransaction(async (client) => {
+    const data = await withTenantTransaction(session, async (client, accountId) => {
       const visitResult = await client.query<VisitRow>(
         `SELECT id, job_id, work_order_id, assigned_user_id, scheduled_start, scheduled_end, status
            FROM visits
           WHERE id = $1 AND account_id = $2
           FOR UPDATE`,
-        [parsed.data.visit_id, session.accountId],
+        [parsed.data.visit_id, accountId],
       );
       const visit = visitResult.rows[0];
       if (!visit) throw new Error("VISIT_NOT_FOUND");
@@ -52,15 +52,14 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
       if (parsed.data.assigned_user_id) {
         const member = await client.query<{ id: string }>(
           `SELECT bm.id FROM business_memberships bm
-             JOIN users u ON u.id = bm.user_id AND u.account_id = bm.account_id
             WHERE bm.user_id = $1 AND bm.account_id = $2
               AND bm.status = 'active' AND bm.role IN ('tech','admin','owner')`,
-          [parsed.data.assigned_user_id, session.accountId],
+          [parsed.data.assigned_user_id, accountId],
         );
         if (!member.rows[0]) throw new Error("TECH_NOT_FOUND");
 
         const conflicts = await getVisitScheduleConflicts(client, {
-          accountId: session.accountId,
+          accountId,
           scheduledStart: new Date(visit.scheduled_start).toISOString(),
           scheduledEnd: new Date(visit.scheduled_end).toISOString(),
           assignedUserId: parsed.data.assigned_user_id,
@@ -69,7 +68,7 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
         });
         if (conflicts.technicianOverlapCount > 0) throw new Error("TECH_CONFLICT");
 
-        const availability = await loadAvailability(client, session.accountId, [parsed.data.assigned_user_id]);
+        const availability = await loadAvailability(client, accountId, [parsed.data.assigned_user_id]);
         const available = isWithinAvailability(availability, new Date(visit.scheduled_start), new Date(visit.scheduled_end));
         if (available === false) throw new Error("TECH_UNAVAILABLE");
       }
@@ -77,26 +76,26 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
       await client.query(
         `UPDATE visits SET assigned_user_id = $1, updated_at = CURRENT_TIMESTAMP
           WHERE id = $2 AND account_id = $3`,
-        [parsed.data.assigned_user_id, visit.id, session.accountId],
+        [parsed.data.assigned_user_id, visit.id, accountId],
       );
 
       if (parsed.data.sync_work_order_lead && visit.work_order_id) {
         await client.query(
           `UPDATE work_orders SET assigned_user_id = $1, updated_at = CURRENT_TIMESTAMP
             WHERE id = $2 AND account_id = $3`,
-          [parsed.data.assigned_user_id, visit.work_order_id, session.accountId],
+          [parsed.data.assigned_user_id, visit.work_order_id, accountId],
         );
       }
 
       const updated = await client.query<VisitRow>(
         `SELECT id, job_id, work_order_id, assigned_user_id, scheduled_start, scheduled_end, status
            FROM visits WHERE id = $1 AND account_id = $2`,
-        [visit.id, session.accountId],
+        [visit.id, accountId],
       );
       const next = updated.rows[0];
 
       await appendAuditLog(client, {
-        account_id: session.accountId,
+        account_id: accountId,
         entity_type: "visit",
         entity_id: visit.id,
         action: "update",
@@ -108,7 +107,7 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
       await client.query(
         `INSERT INTO workflow_events (id, account_id, entity_type, entity_id, event_type, payload, created_at)
          VALUES ($1, $2, 'visit', $3, 'visit.dispatch_assignment_changed', $4, CURRENT_TIMESTAMP)`,
-        [randomUUID(), session.accountId, visit.id, JSON.stringify({ assigned_user_id: parsed.data.assigned_user_id })],
+        [randomUUID(), accountId, visit.id, JSON.stringify({ assigned_user_id: parsed.data.assigned_user_id })],
       ).catch(() => ({ rows: [], rowCount: 0 }));
       return next;
     });

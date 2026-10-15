@@ -5,10 +5,11 @@ import {
   validateSession, type SessionBinding,
 } from './security-boundary.js';
 
-type IdentityStatus = 'active' | 'suspended' | 'revoked' | 'deleted';
+export type IdentityStatus = 'active' | 'suspended' | 'revoked' | 'deleted';
 type Actor = Readonly<{ actor_id: string; status: IdentityStatus }>;
 type Company = Readonly<{ company_id: string; status: IdentityStatus }>;
 type Membership = Readonly<{ actor_id: string; company_id: string; role: string; status: IdentityStatus }>;
+export type CurrentCompanyMembership = Membership & Readonly<{ revision: number }>;
 type Device = Readonly<{ device_id: string; actor_id: string; status: IdentityStatus }>;
 type ExternalBinding = Readonly<{
   binding_id: string; provider: string; subject: string;
@@ -302,6 +303,32 @@ async function migrate(storage: StorageClient): Promise<void> {
   });
 }
 
+/** Validate an already commissioned registry without creating or migrating any
+ * table. Runtime consumers should use this when production startup must never
+ * mutate identity/access state. */
+async function validateExistingSchema(storage: StorageClient): Promise<void> {
+  let versions: number[];
+  try {
+    versions = (await storage.query<{ version: number }>(
+      'SELECT version FROM titan_security_migrations ORDER BY version',
+    )).rows.map(row => row.version);
+  } catch {
+    throw new Error('identity-schema-version-required');
+  }
+  if (versions.length !== 1 || versions[0] !== 1) throw new Error('identity-schema-version-unsupported');
+  try {
+    await storage.query('SELECT actor_id,status,revision FROM titan_security_actors LIMIT 0');
+    await storage.query('SELECT company_id,status,revision FROM titan_security_companies LIMIT 0');
+    await storage.query('SELECT actor_id,company_id,role,status,revision FROM titan_security_memberships LIMIT 0');
+    await storage.query('SELECT device_id,actor_id,status,revision FROM titan_security_devices LIMIT 0');
+    await storage.query('SELECT binding_id,provider,subject,actor_id,company_id,status,revision FROM titan_security_external_bindings LIMIT 0');
+    await storage.query(`SELECT session_id,company_id,actor_id,device_id,binding_id,issued_at,expires_at,
+      revoked,revision,audience,context_generation FROM titan_security_sessions LIMIT 0`);
+  } catch {
+    throw new Error('identity-schema-incomplete');
+  }
+}
+
 /** Explicit, versioned add-on for short-lived DirectAdmin bootstrap nonces.
  * It is intentionally not called by createIdentitySessionRegistry or host
  * startup; commissioning must explicitly initialize this additive store. */
@@ -465,6 +492,73 @@ export class IdentitySessionRegistry {
   }
   putMembership(value: Membership, expected: number | null): Promise<number> {
     return this.put('titan_security_memberships', { actor_id: value.actor_id, company_id: value.company_id, role: value.role, status: value.status }, ['actor_id', 'company_id'], [], expected);
+  }
+
+  /** Read one already-provisioned canonical company membership. This never
+   * creates or infers identity from a legacy user/profile row. */
+  async getMembership(actorId: string, companyId: string): Promise<CurrentCompanyMembership | null> {
+    requireSecurityId(actorId, 'actor_id');
+    requireSecurityId(companyId, 'company_id');
+    return this.transaction(async tx => {
+      const row = (await tx.query<RecordRow>(
+        `SELECT actor_id,company_id,role,status,revision FROM titan_security_memberships
+          WHERE actor_id=$1 AND company_id=$2`, [actorId, companyId],
+      )).rows[0];
+      if (!row) return null;
+      requireSecurityId(row.actor_id as string, 'actor_id');
+      requireSecurityId(row.company_id as string, 'company_id');
+      requireSecurityId(row.role as string, 'role');
+      if (!['active', 'suspended', 'revoked', 'deleted'].includes(row.status as string)) {
+        throw new Error('identity-status-invalid');
+      }
+      requireSecurityRevision(row.revision);
+      return Object.freeze({ actor_id: row.actor_id as string, company_id: row.company_id as string,
+        role: row.role as string, status: row.status as IdentityStatus, revision: row.revision });
+    });
+  }
+
+  /** Change an existing membership only while the supplied current session is
+   * still an owner in that same selected company. Owner authentication, target
+   * existence, and target revision CAS share one GLOBAL_REGISTRY transaction. */
+  async putMembershipAsCurrentOwner(
+    proof: VerifiedSessionIdentity,
+    expected: ExpectedSessionContext,
+    value: Membership,
+    expectedRevision: number,
+    now: string,
+  ): Promise<CurrentCompanyMembership> {
+    if (proof.source_session !== undefined) throw new Error('derived-session-membership-change-denied');
+    requireSecurityId(value.actor_id, 'actor_id');
+    requireSecurityId(value.company_id, 'company_id');
+    requireSecurityId(value.role, 'role');
+    if (!['active', 'suspended', 'revoked', 'deleted'].includes(value.status)) {
+      throw new Error('identity-status-invalid');
+    }
+    requireSecurityRevision(expectedRevision);
+    if (expected.company_id !== value.company_id) throw new Error('membership-company-mismatch');
+
+    return this.transaction(async tx => {
+      const { row, current } = await this.resolve(tx, proof, expected, now);
+      if (proof.credential_expires_at === undefined
+        || securityTimestamp(proof.credential_expires_at) > securityTimestamp(row.expires_at)) {
+        throw new Error('credential-expiry-exceeds-session');
+      }
+      if (current.company_role !== 'owner') throw new Error('membership-owner-required');
+      const old = (await tx.query<RecordRow>(
+        `SELECT actor_id,company_id,role,status,revision FROM titan_security_memberships
+          WHERE actor_id=$1 AND company_id=$2`, [value.actor_id, value.company_id],
+      )).rows[0];
+      if (!old || old.revision !== expectedRevision) throw new Error('identity-revision-conflict');
+      const revision = nextRevision(old.revision);
+      const changed = await tx.query(
+        `UPDATE titan_security_memberships SET role=$1,status=$2,revision=$3
+          WHERE actor_id=$4 AND company_id=$5 AND revision=$6`,
+        [value.role, value.status, revision, value.actor_id, value.company_id, expectedRevision],
+      );
+      if (changed.rowCount !== 1) throw new Error('identity-revision-conflict');
+      return Object.freeze({ actor_id: value.actor_id, company_id: value.company_id,
+        role: value.role, status: value.status, revision });
+    });
   }
   putDevice(value: Device, expected: number | null): Promise<number> {
     return this.put('titan_security_devices', { device_id: value.device_id, actor_id: value.actor_id, status: value.status }, ['device_id'], ['actor_id'], expected);
@@ -866,5 +960,16 @@ export async function createIdentitySessionRegistry(input: {
   if (input.storage_role !== 'GLOBAL_REGISTRY') throw new Error('identity-storage-role-required');
   if (input.storage.dialect !== 'sqlite') throw new Error('identity-storage-dialect-unsupported');
   await migrate(input.storage);
+  return new IdentitySessionRegistry(input.storage, input.now);
+}
+
+/** Open a previously commissioned GLOBAL_REGISTRY without running migrations,
+ * creating schema or backfilling any identity/access records. */
+export async function openIdentitySessionRegistry(input: {
+  storage: StorageClient; storage_role: 'GLOBAL_REGISTRY'; now?: () => Date;
+}): Promise<IdentitySessionRegistry> {
+  if (input.storage_role !== 'GLOBAL_REGISTRY') throw new Error('identity-storage-role-required');
+  if (input.storage.dialect !== 'sqlite') throw new Error('identity-storage-dialect-unsupported');
+  await validateExistingSchema(input.storage);
   return new IdentitySessionRegistry(input.storage, input.now);
 }

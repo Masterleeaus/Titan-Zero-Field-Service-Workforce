@@ -3,7 +3,8 @@ import { z } from "zod";
 import { hash, compare } from "bcryptjs";
 import { withAuth } from "@/lib/auth/middleware";
 import type { AuthSession } from "@/lib/auth/middleware";
-import { getPool, queryOne } from "@/lib/db";
+import { getDatabaseDialect } from "@/lib/db/dialect";
+import { withTenantTransaction } from "@/lib/db/portable";
 import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -43,10 +44,21 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
     );
   }
 
-  const user = await queryOne<{ id: string; password_hash: string }>(
-    `SELECT id, password_hash FROM users WHERE id = $1 AND account_id = $2`,
-    [id, session.accountId]
-  );
+  const user = await withTenantTransaction(session, async (client, accountId) => {
+    const dialect = client.dialect ?? getDatabaseDialect();
+    const result = dialect === "postgres"
+      ? await client.query<{ password_hash: string | null }>(
+          `SELECT public.app_user_password_hash($1::uuid) AS password_hash`,
+          [id],
+        )
+      : await client.query<{ id: string; password_hash: string }>(
+          `SELECT id, password_hash FROM users
+            WHERE id = $1 AND ${dialect === "sqlite" ? "company_id" : "account_id"} = $2`,
+          [id, accountId],
+        );
+    const passwordHash = result.rows[0]?.password_hash;
+    return typeof passwordHash === "string" ? { id, password_hash: passwordHash } : null;
+  });
   if (!user) {
     return NextResponse.json(
       { error: { code: "NOT_FOUND", message: "User not found", traceId: session.traceId } },
@@ -66,13 +78,29 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
 
   const new_hash = await hash(new_password, 12);
 
-  const pool = getPool();
-  const client = await pool.connect();
   try {
-    await client.query(
-      `UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2 AND account_id = $3`,
-      [new_hash, id, session.accountId]
-    );
+    const changed = await withTenantTransaction(session, async (client, accountId) => {
+      const dialect = client.dialect ?? getDatabaseDialect();
+      if (dialect === "postgres") {
+        const result = await client.query<{ changed: boolean }>(
+          `SELECT public.app_update_user_password($1::uuid, $2, $3) AS changed`,
+          [id, user.password_hash, new_hash],
+        );
+        return result.rows[0]?.changed === true;
+      }
+      const result = await client.query(
+        `UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2 AND ${dialect === "sqlite" ? "company_id" : "account_id"} = $3`,
+        [new_hash, id, accountId],
+      );
+      return (result.rowCount ?? 0) === 1;
+    });
+    if (!changed) {
+      return NextResponse.json(
+        { error: { code: "NOT_FOUND", message: "User not found", traceId: session.traceId } },
+        { status: 404 },
+      );
+    }
     return NextResponse.json({ updated: true });
   } catch (error) {
     logger.error("POST /api/v1/users/[id]/password error", error, { traceId: session.traceId });
@@ -80,7 +108,5 @@ export const POST = withAuth(async (request: NextRequest, session: AuthSession) 
       { error: { code: "INTERNAL_ERROR", message: "Failed to update password", traceId: session.traceId } },
       { status: 500 }
     );
-  } finally {
-    client.release();
   }
 });
