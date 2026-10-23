@@ -7,7 +7,7 @@ test('uncertain effect returns recovery-required response, never an auto-retry h
   assert.equal(Object.isFrozen(x.body),true);
 });
 test('company placement denial does not disclose internal registry detail',()=>{
-  for(const code of ['agent3-hosted-operation-denied','agent3-hosted-placement-denied','agent3-hosted-schema-denied','agent3-hosted-commissioning-denied']){
+  for(const code of ['agent3-hosted-operation-denied','agent3-hosted-nested-placement-operation-denied','agent3-hosted-placement-denied','agent3-hosted-schema-denied','agent3-hosted-commissioning-denied']){
     const x=agent3HostedErrorResponse(new Error(code,{cause:new Error('secret-path:/company-PRIVATE/password')}));
     assert.equal(x.status,503);assert.deepEqual(x.body,{error:'conversation-execution-unavailable',retryable:false});
     assert.doesNotMatch(JSON.stringify(x),/secret-path|password|PRIVATE/);

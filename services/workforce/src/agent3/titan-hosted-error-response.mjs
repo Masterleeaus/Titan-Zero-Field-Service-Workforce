@@ -5,6 +5,7 @@
  */
 const failCodes=new Set([
   'agent3-hosted-operation-denied',
+  'agent3-hosted-nested-placement-operation-denied',
   'agent3-hosted-commissioning-denied',
   'agent3-hosted-placement-denied',
   'agent3-hosted-schema-denied',
