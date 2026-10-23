@@ -15,11 +15,14 @@ export async function assertAgent3SqliteMigrations(storage){
   if(tableRows.length!==1||tableRows[0].name!==table||typeof tableRows[0].sql!=='string')fail();
   const cols=await rows(storage,`PRAGMA table_info('${table}')`);
   if(!match(cols.map(x=>x.name),contract.columns)||!match(ordered(cols),contract.pk))fail();
+  // Composite SQLite primary keys may admit NULL without an explicit NOT NULL.
+  for(const column of cols){if(column.name!=='hatchet_run_id'&&column.notnull!==1)fail();}
+  if(table==='agent3_bridge_nonces'&&cols.find(x=>x.name==='expires_at_unix')?.type?.toUpperCase()!=='INTEGER')fail();
   const indexes=await rows(storage,`PRAGMA index_list('${table}')`);
   for(const uniqueColumns of contract.unique){
    let found=false;
    for(const index of indexes){
-    if(index.unique!==1||typeof index.name!=='string'||!/^[A-Za-z_0-9]+$/.test(index.name))continue;
+    if(index.unique!==1||index.partial!==0||typeof index.name!=='string'||!/^[A-Za-z_0-9]+$/.test(index.name))continue;
     const fields=await rows(storage,`PRAGMA index_info('${index.name}')`);
     if(match(fields.sort((a,b)=>a.seqno-b.seqno).map(x=>x.name),uniqueColumns))found=true;
    }
