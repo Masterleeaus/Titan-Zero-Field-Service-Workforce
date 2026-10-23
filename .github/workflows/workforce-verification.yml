@@ -42,6 +42,13 @@ jobs:
           pnpm --filter @titan-zero/workforce exec node --test src/agent3/borrowed-placement-gate.test.mjs
       - name: Agent 3 Hatchet SDK governed transport acceptance
         run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-sdk-ci.test.mjs
+      - name: Agent 3 staging deployment evidence and crash-durable journal
+        run: |
+          pnpm --filter @titan-zero/workforce exec node --test \
+            src/agent3/hatchet-deployment-evidence.test.mjs \
+            src/agent3/hatchet-staging-journal.test.mjs \
+            src/agent3/hatchet-staging-acceptance.test.mjs \
+            src/agent3/hatchet-staging-cli.test.mjs
       - name: Focused native Workforce contract lane
         run: pnpm --filter @titan-zero/titan-platform test:workforce-native
       - name: Focused company-native storage typecheck and tests
