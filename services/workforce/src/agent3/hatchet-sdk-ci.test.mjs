@@ -65,3 +65,26 @@ test('wrong-company run context and raw credentials are rejected before provider
  await assert.rejects(f.sdk.runStatus({...f.subject,hatchet_run_id:'other-run'}),/run-status-unverified/);
  assert.equal(f.sends,0);
 }));
+
+test('parallel direct SDK submitters cannot spend one SQLite reservation twice',use(async f=>{
+ const r=await f.durable.reserveDispatch(f.row);
+ const results=await Promise.allSettled([
+   f.sdk.submit({...f.subject,reservation_id:r.reservation_id}),
+   f.sdk.submit({...f.subject,reservation_id:r.reservation_id})
+ ]);
+ assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+ assert.equal(results.filter(x=>x.status==='rejected').length,1);
+ assert.match(String(results.find(x=>x.status==='rejected').reason),/submission-already-claimed-or-stale|reservation-not-new-and-authorized/);
+ assert.equal(f.sends,1);
+ assert.equal((await f.durable.getDispatch({company_id:COMPANY,work_id:WORK})).state,'UNCERTAIN');
+}));
+test('durable pre-egress claim never becomes auto-retryable after a missing ACK',use(async f=>{
+ const r=await f.durable.reserveDispatch(f.row);
+ const claim=await f.durable.claimSubmission({...f.row,reservation_id:r.reservation_id});
+ assert.equal(claim.safe_to_retry,false);
+ await assert.rejects(f.sdk.submit({...f.subject,reservation_id:r.reservation_id}),/reservation-not-new-and-authorized/);
+ assert.equal(f.sends,0);
+ const pending=await f.durable.listUncertain({company_id:COMPANY});
+ assert.equal(pending.length,1);
+ assert.equal(pending[0].state,'UNCERTAIN');
+}));
