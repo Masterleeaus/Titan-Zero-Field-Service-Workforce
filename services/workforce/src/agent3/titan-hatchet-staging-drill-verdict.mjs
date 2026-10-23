@@ -27,6 +27,26 @@ const acceptedRow=(row,s)=>row?.state==='ACCEPTED'&&
   matching(row,s,['company_id','work_id','worker_id','decision_ref'])&&
   clean(row.reservation_id)&&clean(row.hatchet_run_id)&&
   row.idempotency_key===s.idempotency_key;
+// Every proof included in a positive verdict is re-observed after all other
+// I/O completes. Never rely solely on a first-read provider/evidence/drill
+// snapshot; those can be revoked or changed during an asynchronous review.
+const sameProviderInventory=(page,s,run)=>page?.complete===true&&
+  page.next_cursor===null&&page.total===1&&Array.isArray(page.runs)&&
+  page.runs.length===1&&matching(page.runs[0],s,
+    ['company_id','work_id','tenant','idempotency_key'])&&
+  page.runs[0].hatchet_run_id===run;
+const providerCompleted=(record,s,run)=>matching(record,s,
+  ['company_id','work_id','tenant'])&&record?.hatchet_run_id===run&&
+  record.status==='COMPLETED';
+const evidenceIdentity=(r)=>Object.freeze({
+  acceptance_ref:r.acceptance_ref,authority_revision:r.authority_revision,
+  accepted_at:r.accepted_at,hatchet_run_id:r.hatchet_run_id,
+});
+const drillIdentity=(r)=>Object.freeze({
+  drill_ref:r.drill_ref,observer_ref:r.observer_ref,rollback_ref:r.rollback_ref,
+  observed_at:r.observed_at,hatchet_run_id:r.hatchet_run_id,
+});
+const sameFields=(a,b)=>Object.keys(a).every(k=>a[k]===b[k]);
 const approvedEvidence=(record,s,run,now)=>{
   if(record?.schema!=='titan.agent3.accepted-business-evidence/v1'||
      record.verified!==true||record.accepted!==true||
@@ -75,39 +95,62 @@ export function createHatchetStagingDrillVerifier({authorizeReview,readDeploymen
            !matching(deployment,subject,['company_id','tenant','worker_id','workflow_name'])||
            !clean(deployment.registration_revision)||!clean(deployment.deployment_ref)||
            !clean(deployment.workflow_id))refused();
+        // Snapshot identity immediately: operators may return mutable cached
+        // objects that change in-place during later provider observation.
+        const initialDeployment=Object.freeze({
+          registration_revision:deployment.registration_revision,
+          deployment_ref:deployment.deployment_ref,workflow_id:deployment.workflow_id});
         const row=await readCanonicalDispatch({company_id:subject.company_id,work_id:subject.work_id});
         if(!acceptedRow(row,subject))refused();
+        const runId=row.hatchet_run_id;
         const found=await listProviderRuns({company_id:subject.company_id,work_id:subject.work_id,
           tenant:subject.tenant,idempotency_key:subject.idempotency_key,limit:101});
         // Only a complete provider inventory can establish exactly one run.
-        if(found?.complete!==true||found.next_cursor!==null||found.total!==1||
-           !Array.isArray(found.runs)||found.runs.length!==1||
-           !matching(found.runs[0],subject,['company_id','work_id','tenant','idempotency_key'])||
-           found.runs[0].hatchet_run_id!==row.hatchet_run_id)refused();
+        if(!sameProviderInventory(found,subject,runId))refused();
         const run=await readProviderRun({company_id:subject.company_id,tenant:subject.tenant,
-          work_id:subject.work_id,hatchet_run_id:row.hatchet_run_id});
-        if(!matching(run,subject,['company_id','work_id','tenant'])||
-           run.hatchet_run_id!==row.hatchet_run_id||run.status!=='COMPLETED')refused();
+          work_id:subject.work_id,hatchet_run_id:runId});
+        if(!providerCompleted(run,subject,runId))refused();
         const evidence=await readAcceptedBusinessEvidence({company_id:subject.company_id,
-          work_id:subject.work_id,hatchet_run_id:row.hatchet_run_id});
-        approvedEvidence(evidence,subject,row.hatchet_run_id,now);
+          work_id:subject.work_id,hatchet_run_id:runId});
+        approvedEvidence(evidence,subject,runId,now);
+        const initialEvidence=evidenceIdentity(evidence);
         const drill=await readMeasuredDrill({company_id:subject.company_id,
-          work_id:subject.work_id,tenant:subject.tenant,hatchet_run_id:row.hatchet_run_id});
-        measuredDrill(drill,subject,row.hatchet_run_id,now);
-        // Do not rely on the admission snapshot after slow provider/ledger IO.
-        const [freshDeployment,freshRow,freshApproval]=await Promise.all([
+          work_id:subject.work_id,tenant:subject.tenant,hatchet_run_id:runId});
+        measuredDrill(drill,subject,runId,now);
+        const initialDrill=drillIdentity(drill);
+        // Final observation includes EVERY positive source, not just the
+        // company registry and reviewer approval. A status revocation,
+        // provider duplicate, evidence withdrawal or rollback drift must
+        // prevent a positive report even if an earlier snapshot passed.
+        const [freshDeployment,freshRow,freshApproval,freshInventory,
+          freshRun,freshEvidence,freshDrill]=await Promise.all([
           readDeployment(location),
           readCanonicalDispatch({company_id:subject.company_id,work_id:subject.work_id}),
           authorizeReview({company_id:subject.company_id,work_id:subject.work_id,
-            actor_id:subject.actor_id,action:'hatchet.staging.drill.review'})]);
+            actor_id:subject.actor_id,action:'hatchet.staging.drill.review'}),
+          listProviderRuns({company_id:subject.company_id,work_id:subject.work_id,
+            tenant:subject.tenant,idempotency_key:subject.idempotency_key,limit:101}),
+          readProviderRun({company_id:subject.company_id,tenant:subject.tenant,
+            work_id:subject.work_id,hatchet_run_id:runId}),
+          readAcceptedBusinessEvidence({company_id:subject.company_id,
+            work_id:subject.work_id,hatchet_run_id:runId}),
+          readMeasuredDrill({company_id:subject.company_id,
+            work_id:subject.work_id,tenant:subject.tenant,hatchet_run_id:runId})]);
         if(freshDeployment?.verified!==true||
-           freshDeployment.registration_revision!==deployment.registration_revision||
-           freshDeployment.deployment_ref!==deployment.deployment_ref||
-           freshDeployment.workflow_id!==deployment.workflow_id||
-           !acceptedRow(freshRow,subject)||freshRow.hatchet_run_id!==row.hatchet_run_id||
+           freshDeployment.registration_revision!==initialDeployment.registration_revision||
+           freshDeployment.deployment_ref!==initialDeployment.deployment_ref||
+           freshDeployment.workflow_id!==initialDeployment.workflow_id||
+           !acceptedRow(freshRow,subject)||freshRow.hatchet_run_id!==runId||
            freshApproval?.allowed!==true||!matching(freshApproval,subject,
-             ['company_id','work_id','actor_id','decision_ref']))refused();
-        if(clock()-now>60_000||clock()<now)refused();
+             ['company_id','work_id','actor_id','decision_ref'])||
+           !sameProviderInventory(freshInventory,subject,runId)||
+           !providerCompleted(freshRun,subject,runId))refused();
+        approvedEvidence(freshEvidence,subject,runId,now);
+        measuredDrill(freshDrill,subject,runId,now);
+        if(!sameFields(evidenceIdentity(freshEvidence),initialEvidence)||
+           !sameFields(drillIdentity(freshDrill),initialDrill))refused();
+        const completedAt=clock();
+        if(!Number.isSafeInteger(completedAt)||completedAt<now||completedAt-now>60_000)refused();
         return Object.freeze({schema:'titan.agent3.staging-drill-verdict/v1',
           company_id:subject.company_id,work_id:subject.work_id,tenant:subject.tenant,
           deployment_ref:deployment.deployment_ref,registration_revision:deployment.registration_revision,
