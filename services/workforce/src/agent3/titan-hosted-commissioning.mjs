@@ -27,7 +27,7 @@ export async function resolveHostedAgent3Ports(setting, { signal } = {}) {
   const companies = new Set(setting.company_ids);
   const attest = await setting.assertReady({company_ids: [...companies],signal});
   if (signal?.aborted || attest?.schema !== 'titan.agent3.hosted-readiness/v1' ||
-      attest?.company_ids?.length !== companies.size ||
+      !Array.isArray(attest?.company_ids) || attest.company_ids.length !== companies.size ||
       !attest.company_ids.every(company_id => companies.has(company_id)) ||
       !READY.every(key => attest[key] === 'verified')) fail();
   const source = setting.ports.resolveCompanyStorage;
