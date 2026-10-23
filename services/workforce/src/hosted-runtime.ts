@@ -14,6 +14,8 @@ import { AUTHENTICATED_SESSION_PROOF_TYPE, type AuthenticatedWorkIdentity } from
 import { createCompanyScopedWorkOrders, type HostedCompanyWorkOrderOperations } from "./company-scoped-work-orders.js";
 // @ts-expect-error Agent 3 operator-only integration module is deliberately plain JavaScript.
 import { resolveHostedAgent3Ports } from "./agent3/titan-hosted-commissioning.mjs";
+// @ts-expect-error Operator-owned Agent 3 integration is plain JavaScript.
+import { createHostedAgent3Operations } from "./agent3/titan-hosted-operational-guard.mjs";
 
 const derivedWorkforceSessionPrefix = "workforce-zero-";
 
@@ -339,10 +341,11 @@ export async function createHostedRuntime(storage: StorageClient, identityStorag
       } catch (error) { throw captureIdentityFailure(error); }
     },
   });
-  const dispatch = runtime.dispatch;
-  const recover = runtime.recover;
+  const guardedRuntime = createHostedAgent3Operations({runtime,commissioning:agent3Commissioning,signal});
+  const dispatch = guardedRuntime.dispatch;
+  const recover = guardedRuntime.recover;
   const surfacedRuntime = Object.freeze({
-    ...runtime,
+    ...guardedRuntime,
     async verifyWorkforceZeroSession(credential: string, child: WorkforceZeroBridgeContext): Promise<void> {
       await resolveWorkforceZeroIdentity(credential, child);
     },

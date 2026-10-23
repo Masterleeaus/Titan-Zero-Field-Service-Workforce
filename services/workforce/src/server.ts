@@ -165,6 +165,12 @@ export async function createWorkforceServer(options: WorkforceServerOptions = {}
           signal.throwIfAborted();
           for (const key of ["authentication", "authority", "provider", "evidence"] as const) result[key] = observed[key] === true ? "ok" : "fail";
         }
+        // An operator-commissioned Agent 3 host cannot report READY if its
+        // allowlisted company placement or transport schema has drifted.
+        if (hosted?.runtime.verifyOperationalReady) {
+          try { await hosted.runtime.verifyOperationalReady(); result.agent3 = "ok"; }
+          catch { result.agent3 = "fail"; }
+        }
       } catch { result.runtime = "fail"; }
       return result;
     }, { timeoutMs: 1000, signal: lifecycle.signal }).catch(() => ({
