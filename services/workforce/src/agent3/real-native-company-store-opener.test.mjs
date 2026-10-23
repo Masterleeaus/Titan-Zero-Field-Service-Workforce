@@ -11,11 +11,11 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 const exec=promisify(execFile);
-const cwd=fileURLToPath(new URL('../',import.meta.url));
+const cwd=fileURLToPath(new URL('../../',import.meta.url));
 const store=fileURLToPath(new URL('../../../../packages/storage/src/company-store-opener.ts',import.meta.url));
 const sqlite=fileURLToPath(new URL('../../../../packages/storage/src/sqlite-client.ts',import.meta.url));
 const gate=fileURLToPath(new URL('../../../../packages/storage/src/company-placement-operation-gate.ts',import.meta.url));
-const script=String.raw\`
+const script=String.raw`
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -72,8 +72,7 @@ try {
  } finally {await maintenance();}
  console.log('canonical-better-sqlite3-native-opener-borrowed-pass');
 } finally {await rm(root,{recursive:true,force:true});}
-\`;
-test('actual better-sqlite3 native opener borrows the held gate and excludes maintenance',async()=>{
+`;test('actual better-sqlite3 native opener borrows the held gate and excludes maintenance',async()=>{
  const env={...process.env,TITAN_TEST_OPENER:store,TITAN_TEST_SQLITE:sqlite,TITAN_TEST_GATE:gate};
  const {stdout}=await exec(process.execPath,['--import','tsx','--input-type=module','-e',script],{cwd,env,timeout:15000});
  assert.match(stdout,/canonical-better-sqlite3-native-opener-borrowed-pass/);
