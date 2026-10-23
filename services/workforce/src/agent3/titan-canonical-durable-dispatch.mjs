@@ -76,6 +76,28 @@ export function createCanonicalDurableDispatch({ resolveCompanyStorage, clock = 
         fail('dispatch-collision-manual-review');
       return {created:false,reservation_id:existing.reservation_id,state:existing.state,hatchet_run_id:existing.hatchet_run_id ?? null};
     },
+    /**
+     * Single atomic, durable egress gate. A reservation alone proves identity
+     * but does NOT serialize independent SDK submit callers: they could both
+     * read RESERVED and both start an external Hatchet workflow. Move it to
+     * UNCERTAIN by CAS BEFORE any provider effect. The existing schema/state
+     * already treats UNCERTAIN as never safe to retry, even after a crash.
+     *
+     * A complete authoritative reservation fingerprint must match; neither a
+     * different worker nor a stale decision may spend this reservation.
+     */
+    async claimSubmission({company_id,work_id,worker_id,reservation_id,idempotency_key,decision_ref}) {
+      for (const [name,value] of Object.entries({company_id,work_id,worker_id,reservation_id,idempotency_key,decision_ref})) id(value,name);
+      const storage = await storageFor(company_id);
+      const result = await storage.query(`UPDATE agent3_hatchet_transport
+        SET state='UNCERTAIN',updated_at=$7
+        WHERE company_id=$1 AND work_id=$2 AND worker_id=$3 AND reservation_id=$4
+        AND idempotency_key=$5 AND decision_ref=$6
+        AND state='RESERVED' AND hatchet_run_id IS NULL`,
+        [company_id,work_id,worker_id,reservation_id,idempotency_key,decision_ref,clock()]);
+      if(result.rowCount!==1) fail('submission-already-claimed-or-stale');
+      return Object.freeze({company_id,work_id,reservation_id,state:'UNCERTAIN',safe_to_retry:false});
+    },
     async getDispatch({company_id,work_id}) {
       id(company_id,'company-id');id(work_id,'work-id');
       return rowFor(await storageFor(company_id),company_id,work_id);

@@ -57,6 +57,7 @@ export function createGovernedHatchetSdkTransport({
   inspectRun, cancelRun, checkWorkerHealth, authorizeCancel,
 }={}) {
   requiredFn(durable,'getDispatch');
+  requiredFn(durable,'claimSubmission');
   for (const [port,method] of [[{resolveClient},'resolveClient'],[{resolveRegisteredWorkflow},'resolveRegisteredWorkflow'],
     [{listCompleteRuns},'listCompleteRuns'],[{inspectRun},'inspectRun'],
     [{cancelRun},'cancelRun'],[{checkWorkerHealth},'checkWorkerHealth'],[{authorizeCancel},'authorizeCancel']]) requiredFn(port,method);
@@ -79,6 +80,12 @@ export function createGovernedHatchetSdkTransport({
       const workflow=await resolveRegisteredWorkflow({company_id:input.company_id,
         tenant:input.tenant,worker_id:input.worker_id,client});
       requiredFn(workflow,'runNoWait');
+      // Atomically spend the RESERVED record before crossing the external
+      // boundary. After this point a crash, lost SDK ACK or concurrent caller
+      // MUST reconcile, never send a second workflow from this reservation.
+      await durable.claimSubmission({company_id:input.company_id,work_id:input.work_id,
+        worker_id:input.worker_id,reservation_id:input.reservation_id,
+        idempotency_key:input.idempotency_key,decision_ref:input.decision_ref});
       // Do not carry arbitrary user/model payloads across the transport.
       // A fixed registered workflow reads Titan's authority/evidence by ID.
       const ref=await workflow.runNoWait(Object.freeze({titan: Object.freeze({
