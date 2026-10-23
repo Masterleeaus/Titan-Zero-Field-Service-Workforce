@@ -9,7 +9,7 @@ function fixture(){
  const db=new DatabaseSync(':memory:');
  const storage={async query(sql,args=[]){const stmt=db.prepare(sql),bind=Object.fromEntries(args.map((x,i)=>['$'+(i+1),x]));if(/^\s*(SELECT|PRAGMA)/i.test(sql)){const rows=stmt.all(bind);return {rows,rowCount:rows.length};}return {rows:[],rowCount:stmt.run(bind).changes};}};
  const resolver=async company=>company==='company-a'?storage:null;
- const ports={resolveCompanyStorage:resolver,runtimeRoutingPolicy:async ({company_id,work_id})=>({company_id,work_id,mode:'native'})};
+ const ports={resolveCompanyStorage:resolver,acquirePlacementOperation:async p=>({...p,assertPlacementBound:async()=>{},release:async()=>{}}),runtimeRoutingPolicy:async ({company_id,work_id})=>({company_id,work_id,mode:'native'})};
  const setting={schema:'titan.agent3.hosted-commissioning/v1',mode:'operator-authorized',enabled:true,company_ids:['company-a'],ports,assertReady:async ({company_ids})=>({schema:'titan.agent3.hosted-readiness/v1',company_ids,...Object.fromEntries(GOOD.map(x=>[x,'verified']))})};
  const registry={async findByCompanyId(company_id){return company_id==='company-a'?{company_id,placement_id:'placement-a',placement_revision:1,provider:'sqlite',schema_version:'v1',status:'READY'}:null;}};
  return {db,storage,ports,setting,registry};

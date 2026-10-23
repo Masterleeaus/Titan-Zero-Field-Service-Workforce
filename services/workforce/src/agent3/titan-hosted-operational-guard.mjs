@@ -22,7 +22,9 @@ export function createHostedAgent3Operations({runtime,commissioning,signal}={}) 
       !method(runtime.zeroDispatcher,'dispatch') ||
       !method(runtime.zeroDispatcher,'recoverInterrupted') ||
       !method(runtime.zeroDispatcher,'reconcilePersistedWork') ||
-      !method(commissioning,'verifyHostedPreflight') || commissioning.strictCommissioning!==true) fail();
+      !method(commissioning,'verifyHostedPreflight') ||
+      !method(commissioning,'acquirePlacementOperation') ||
+      commissioning.strictCommissioning!==true || commissioning.strictPhysicalFencing!==true) fail();
 
   async function verify({company_id}={}) {
     if (signal?.aborted || (company_id!==undefined && !validId(company_id))) fail();
@@ -40,26 +42,33 @@ export function createHostedAgent3Operations({runtime,commissioning,signal}={}) 
    * Mark outcome uncertain and require canonical evidence reconciliation; never
    * make an automatic retry from this error.
    */
-  async function execute(input, operation) {
-    if (!validId(input?.company_id)) fail();
+  async function execute(input,operation){
+    if(!validId(input?.company_id))fail();
     const company_id=input.company_id;
     await verify({company_id});
-    if (signal?.aborted) fail();
-    let result;
-    let operationError;
-    let operationFailed=false;
-    try { result=await operation(); }
-    catch (error) { operationError=error; operationFailed=true; }
-    try {
+    let lease;
+    try{
+      lease=await commissioning.acquirePlacementOperation(company_id);
+      if(!lease||!method(lease,'assertCurrent')||!method(lease,'release'))fail();
+      await lease.assertCurrent();
       await verify({company_id});
-    } catch (revalidationError) {
-      // An attempted effect might already have happened. Preserve the failure
-      // as an ambiguous outcome, not a safe-to-retry provider error.
-      throw new Error('agent3-hosted-outcome-uncertain', {
-        cause: operationFailed ? operationError : revalidationError,
-      });
+    }catch(error){
+      if(lease&&method(lease,'release'))await lease.release().catch(()=>undefined);
+      throw new Error('agent3-hosted-operation-denied',{cause:error});
     }
-    if (operationFailed) throw operationError;
+    let result,operationError,operationFailed=false,postError;
+    try{
+      if(signal?.aborted)fail();
+      try{result=await operation();}
+      catch(error){operationError=error;operationFailed=true;}
+      try{await lease.assertCurrent();await verify({company_id});}
+      catch(error){postError=error;}
+    }finally{
+      try{await lease.release();}
+      catch(error){postError??=error;}
+    }
+    if(postError)throw new Error('agent3-hosted-outcome-uncertain',{cause:operationFailed?operationError:postError});
+    if(operationFailed)throw operationError;
     return result;
   }
   // Expose only the operational projections consumed by the existing hosted

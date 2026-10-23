@@ -25,7 +25,8 @@ export async function resolveHostedAgent3Ports(setting, { signal, companyPlaceme
       typeof setting.assertReady !== 'function' || !setting.ports ||
       typeof setting.ports !== 'object' || Array.isArray(setting.ports) ||
       typeof setting.ports.resolveCompanyStorage !== 'function' ||
-      typeof setting.ports.runtimeRoutingPolicy !== 'function') fail();
+      typeof setting.ports.runtimeRoutingPolicy !== 'function' ||
+      typeof setting.ports.acquirePlacementOperation !== 'function') fail();
   const companies = new Set(setting.company_ids);
   const attest = await setting.assertReady({company_ids: [...companies],signal});
   if (signal?.aborted || attest?.schema !== 'titan.agent3.hosted-readiness/v1' ||
@@ -34,6 +35,35 @@ export async function resolveHostedAgent3Ports(setting, { signal, companyPlaceme
       !READY.every(key => attest[key] === 'verified')) fail();
   const placement = await createHostedPlacementFence({company_ids:[...companies],companyPlacementRegistry,signal});
   const source = setting.ports.resolveCompanyStorage;
+  const physicalAcquirer=setting.ports.acquirePlacementOperation;
+  // Trusted operator selects the existing canonical cross-process gate.
+  async function acquirePlacementOperation(company_id){
+    if(!companies.has(company_id)||signal?.aborted)fail();
+    const expected=await placement.assertCurrent(company_id);
+    let lease;
+    try{
+      lease=await physicalAcquirer(expected,{signal});
+      if(!lease||lease.company_id!==expected.company_id||
+         lease.placement_id!==expected.placement_id||
+         lease.placement_revision!==expected.placement_revision||
+         typeof lease.assertPlacementBound!=='function'||typeof lease.release!=='function')fail();
+      await lease.assertPlacementBound();
+      await placement.assertCurrent(company_id);
+      return Object.freeze({
+        async assertCurrent(){
+          if(signal?.aborted)fail();
+          await lease.assertPlacementBound();
+          await placement.assertCurrent(company_id);
+        },
+        release:async()=>lease.release(),
+      });
+    }catch(error){
+      if(lease&&typeof lease.release==='function'){
+        try{await lease.release();}catch{/* preserve original error */}
+      }
+      throw error;
+    }
+  }
   const seenStorage = new Set();
   for (const company_id of companies) {
     if (signal?.aborted) fail();
@@ -42,6 +72,8 @@ export async function resolveHostedAgent3Ports(setting, { signal, companyPlaceme
     if(seenStorage.has(storage))fail();
     seenStorage.add(storage);
     await assertAgent3SqliteMigrations(storage);
+    const lease=await acquirePlacementOperation(company_id);
+    try{await lease.assertCurrent();}finally{await lease.release();}
   }
   // Read-only post-startup diagnostic: verifies the same registered companies
   // still have the expected schema and placement. It does not test live Hatchet.
@@ -65,6 +97,8 @@ export async function resolveHostedAgent3Ports(setting, { signal, companyPlaceme
     verifyHostedPreflight,
     companyCount:companies.size,
     strictCommissioning:true,
+    strictPhysicalFencing:true,
+    acquirePlacementOperation,
     resolveCompanyStorage: async company_id => {
       if(!companies.has(company_id))fail();
       await placement.assertCurrent(company_id);
