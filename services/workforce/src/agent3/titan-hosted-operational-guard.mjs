@@ -53,25 +53,33 @@ export function createHostedAgent3Operations({runtime,commissioning,signal}={}) 
     let lease;
     try{
       lease=await commissioning.acquirePlacementOperation(company_id);
-      if(!lease||!method(lease,'assertCurrent')||!method(lease,'release'))fail();
+      if(!lease||!method(lease,'assertCurrent')||!method(lease,'release')||!method(lease,'runWithContext'))fail();
       await lease.assertCurrent();
       await verify({company_id});
     }catch(error){
       if(lease&&method(lease,'release'))await lease.release().catch(()=>undefined);
       throw new Error('agent3-hosted-operation-denied',{cause:error});
     }
-    let result,operationError,operationFailed=false,postError;
+    let result,operationError,operationFailed=false,postError,startedEffect=false;
     try{
-      if(signal?.aborted)fail();
-      try{result=await operation();}
-      catch(error){operationError=error;operationFailed=true;}
-      try{await lease.assertCurrent();await verify({company_id});}
-      catch(error){postError=error;}
-    }finally{
+      // This scope is minted ONLY by the canonical gate while it owns the
+      // physical placement. Existing native opener/query/transaction calls
+      // reuse that exact gate, never a second exclusive lock.
+      await lease.runWithContext(async()=>{
+        if(signal?.aborted)fail();
+        await lease.assertCurrent();
+        startedEffect=true;
+        try{result=await operation();}
+        catch(error){operationError=error;operationFailed=true;}
+        try{await lease.assertCurrent();await verify({company_id});}
+        catch(error){postError=error;}
+      });
+    }catch(error){postError??=error;}
+    finally{
       try{await lease.release();}
       catch(error){postError??=error;}
     }
-    if(postError)throw new Error('agent3-hosted-outcome-uncertain',{cause:operationFailed?operationError:postError});
+    if(postError)throw new Error(startedEffect?'agent3-hosted-outcome-uncertain':'agent3-hosted-operation-denied',{cause:operationFailed?operationError:postError});
     if(operationFailed)throw operationError;
     return result;
   }

@@ -30,9 +30,11 @@ export function createCanonicalPlacementGateAcquirer({resolveGate,assertPhysical
     let release,acquired=false;
     try {
       const gate=await resolveGate(bound,{signal});
-      if(typeof gate?.acquire!=='function' || typeof gate.acquireMaintenance!=='function')denied();
-      release=await gate.acquire({signal,timeoutMs});
-      if(typeof release!=='function')denied();
+      if(typeof gate?.acquireBorrowable!=='function' || typeof gate.acquireMaintenance!=='function')denied();
+      const borrowed=await gate.acquireBorrowable({signal,timeoutMs});
+      if(typeof borrowed?.run!=='function'||typeof borrowed?.release!=='function')denied();
+      release=()=>borrowed.release();
+      const runWithContext=operation=>borrowed.run(operation);
       acquired=true;
       let closed=false;
       const assertPlacementBound=async()=>{
@@ -44,8 +46,11 @@ export function createCanonicalPlacementGateAcquirer({resolveGate,assertPhysical
            observed.provider!==bound.provider||
            observed.schema_version!==bound.schema_version)denied();
       };
-      await assertPlacementBound();
-      return Object.freeze({...bound,assertPlacementBound,
+      // The binding verifier may use a normal canonical native opener/query.
+      // Therefore it MUST be called within the same minted borrowed scope.
+      await runWithContext(assertPlacementBound);
+      return Object.freeze({...bound,
+        assertPlacementBound:()=>runWithContext(assertPlacementBound),runWithContext,
         async release(){
           if(closed)denied();
           closed=true;

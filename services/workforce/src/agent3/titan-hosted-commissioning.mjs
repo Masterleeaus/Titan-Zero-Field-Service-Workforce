@@ -46,7 +46,8 @@ export async function resolveHostedAgent3Ports(setting, { signal, companyPlaceme
       if(!lease||lease.company_id!==expected.company_id||
          lease.placement_id!==expected.placement_id||
          lease.placement_revision!==expected.placement_revision||
-         typeof lease.assertPlacementBound!=='function'||typeof lease.release!=='function')fail();
+         typeof lease.assertPlacementBound!=='function'||typeof lease.release!=='function'||
+         typeof lease.runWithContext!=='function')fail();
       await lease.assertPlacementBound();
       await placement.assertCurrent(company_id);
       return Object.freeze({
@@ -55,6 +56,7 @@ export async function resolveHostedAgent3Ports(setting, { signal, companyPlaceme
           await lease.assertPlacementBound();
           await placement.assertCurrent(company_id);
         },
+        runWithContext:operation=>lease.runWithContext(operation),
         release:async()=>lease.release(),
       });
     }catch(error){
