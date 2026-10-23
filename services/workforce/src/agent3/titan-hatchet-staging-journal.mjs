@@ -79,7 +79,26 @@ export function createHatchetStagingJournal({reportPath,mode,subject,clock=()=>n
        result.company_id!==subject.company_id||result.work_id!==subject.work_id||
        result.tenant!==subject.tenant||result.worker_id!==subject.worker_id ||
        result.safe_to_retry!==false)fail('result-invalid');
+    // A staging report is evidence of *observation*, never permission to
+    // retry, commission, or declare a Titan business effect accepted. Reject
+    // claims rather than silently persisting them in a signed-off-looking file.
+    if(result.business_outcome_verified!==false||
+       !(result.commissioning_approved===false || (mode==='inspect' && result.commissioning_approved===undefined))||
+       !['PROVIDER_COMPLETED','PROVIDER_ACCEPTED','REQUIRES_RECONCILIATION',undefined].includes(result.status) ||
+       (mode==='inspect' && (result.inspection_only!==true||result.run_id!==undefined)) ||
+       (mode==='execute' && result.inspection_only===true))fail('unsupported-outcome-claim');
     const payload=Object.fromEntries(safeKeys.filter(k=>Object.hasOwn(result,k)).map(k=>[k,result[k]]));
+    payload.commissioning_approved=false;
+    const cleanField=x=>typeof x==='string'&&x.length>0&&x.length<=256&&
+      !/[\u0000-\u001f\u007f]/.test(x)&&!/[<>\r\n]/.test(x);
+    for(const key of ['run_id','provider_status','deployment_ref','checked_at','reserved_state']){
+      if(payload[key]!==undefined&&payload[key]!==null&&!cleanField(payload[key]))fail('untrusted-report-field');
+    }
+    if(payload.provider_run_count!==undefined&&payload.provider_run_count!==null&&
+       (!Number.isSafeInteger(payload.provider_run_count)||payload.provider_run_count<0||payload.provider_run_count>100))
+      fail('untrusted-run-count');
+    if(payload.provider_uniqueness_verified!==undefined&&typeof payload.provider_uniqueness_verified!=='boolean')
+      fail('untrusted-uniqueness-claim');
     // No provider stack/exception details in customer-visible or operator
     // artifacts: observation_error is a fixed category only.
     if(payload.observation_error!==undefined &&

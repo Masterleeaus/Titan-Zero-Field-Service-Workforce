@@ -42,6 +42,8 @@ jobs:
           pnpm --filter @titan-zero/workforce exec node --test src/agent3/borrowed-placement-gate.test.mjs
       - name: Agent 3 Hatchet SDK governed transport acceptance
         run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-sdk-ci.test.mjs
+      - name: Agent 3 read-only staging crash recovery and no-retry contract
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-staging-recovery-ci.test.mjs
       - name: Agent 3 staging deployment evidence and crash-durable journal
         run: |
           pnpm --filter @titan-zero/workforce exec node --test \
