@@ -11,6 +11,7 @@ import { createCanonicalExecutionOwner } from './titan-canonical-execution-owner
 import { createHatchetWorkforceAdapter } from './titan-hatchet-workforce-adapter.mjs';
 import { createGovernedRuntimeSelector } from './titan-runtime-dispatch-selector.mjs';
 import { createHatchetRunReconciler } from './titan-hatchet-run-reconciler.mjs';
+import { createAgent3RecoveryOperations } from './titan-hatchet-recovery-operations.mjs';
 import { createFencedZeroRuntime } from './titan-fenced-zero-runtime.mjs';
 
 const method = (o,n) => { if(typeof o?.[n]!=='function') throw new TypeError(`commissioning-port-required:${n}`); };
@@ -67,7 +68,18 @@ export function createCanonicalAgent3Commissioning({
     authorizeReconcile:input=>authorization.authorizeReconciliation(input),
     requireCompletePage:strictCommissioning,
   });
+  // A recovery lane is only surfaced when all operator-owned cancellation,
+  // worker-health and effective-authority ports are available. It cannot be
+  // silently replaced with a guessed provider cancellation API. This remains
+  // a non-publishing observation/request port; Titan owns business evidence.
+  const recovery = typeof authorization.authorizeRecovery === 'function' &&
+    typeof hatchetTransport.requestCancellation === 'function' &&
+    typeof hatchetTransport.workerHealth === 'function'
+      ? createAgent3RecoveryOperations({durable,reconciler,transport:hatchetTransport,
+          resolvePlacement:input=>placement.resolvePlacement(input),
+          authorizeRecovery:input=>authorization.authorizeRecovery(input)}) : null;
   return Object.freeze({
+    recovery,
     async migrate(company_id) {
       // Both migrations must finish before commissioning any execution ingress.
       await durable.migrate(company_id);
