@@ -57,6 +57,19 @@ export function createLiveStagingReadinessGate({verifyDeployment,inspectRegister
         if(current?.verified!==true||current.registration_revision!==proof.registration_revision||
            current.deployment_ref!==proof.deployment_ref||current.workflow_id!==proof.workflow_id||
            current.company_id!==input.company_id||current.tenant!==input.tenant)deny();
+        // The operator decision can be revoked or expire while provider
+        // inventory is enumerated. Re-read it after the slow observations;
+        // eligibility must not rest on an expired *admission* snapshot.
+        const lastApproval=await authorizeStaging({company_id:input.company_id,work_id:input.work_id,
+          worker_id:input.worker_id,actor_id:input.actor_id,action:'hatchet.staging.one-shot'});
+        const completedAt=clock();
+        const lastExpires=Date.parse(lastApproval?.expires_at);
+        if(!Number.isSafeInteger(completedAt)||completedAt<now||completedAt-now>60_000||
+           lastApproval?.allowed!==true||lastApproval.company_id!==input.company_id||
+           lastApproval.work_id!==input.work_id||lastApproval.actor_id!==input.actor_id||
+           lastApproval.decision_ref!==input.decision_ref||
+           lastApproval.environment!=='isolated-staging'||!Number.isFinite(lastExpires)||
+           lastExpires<=completedAt||lastExpires-completedAt>900_000)deny();
         return Object.freeze({schema:'titan.agent3.live-readiness/v1',
           company_id:input.company_id,work_id:input.work_id,tenant:input.tenant,
           deployment_ref:proof.deployment_ref,registration_revision:proof.registration_revision,

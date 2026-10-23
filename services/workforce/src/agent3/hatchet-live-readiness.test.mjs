@@ -30,7 +30,7 @@ test('read-only, current independently attested staging one-shot can be eligible
  const f=fixture(),r=await f.gate.assess(inp);
  assert.equal(r.staging_disposable_one_shot_eligible,true);
  for(const k of ['commissioning_approved','safe_to_retry','business_outcome_verified','live_hatchet_execution_observed'])assert.equal(r[k],false);
- assert.deepEqual(f.calls,['authority','deployment','policy','titan','provider','deployment']);
+ assert.deepEqual(f.calls,['authority','deployment','policy','titan','provider','deployment','authority']);
  assert.equal(Object.isFrozen(r),true);
 });
 test('existing canonical reservation rejects before provider inventory',async()=>{
@@ -74,6 +74,24 @@ test('wrong tenant or caller-supplied token does not permit staging',async()=>{
 test('non-staging environment and malformed identity are denied',async()=>{
  const f=fixture();await assert.rejects(()=>f.gate.assess({...inp,environment:'production'}),denied);
  await assert.rejects(()=>f.gate.assess({...inp,company_id:''}),denied);
+});
+test('operator revocation during provider inventory denies final eligibility',async()=>{
+ let approvals=0;
+ const f=fixture({authorizeStaging:async()=>({...{
+  allowed:++approvals===1,company_id:inp.company_id,work_id:inp.work_id,
+  actor_id:inp.actor_id,decision_ref:inp.decision_ref,environment:'isolated-staging',
+  expires_at:new Date(now+300000).toISOString()}})});
+ await assert.rejects(()=>f.gate.assess(inp),denied);assert.equal(approvals,2);
+});
+test('approval that expires while external inventory is read must be rejected',async()=>{
+ let calls=0;
+ const f=fixture({clock:()=>now+(++calls>1?310000:0)});
+ await assert.rejects(()=>f.gate.assess(inp),denied);
+});
+test('readiness refuses an observation window longer than 60 seconds',async()=>{
+ let calls=0;
+ const f=fixture({clock:()=>now+(++calls>1?61000:0)});
+ await assert.rejects(()=>f.gate.assess(inp),denied);
 });
 test('port requirements are explicit and may not be inferred from untrusted input',()=>{
  assert.throws(()=>createLiveStagingReadinessGate({}),/trusted-port-required/);
