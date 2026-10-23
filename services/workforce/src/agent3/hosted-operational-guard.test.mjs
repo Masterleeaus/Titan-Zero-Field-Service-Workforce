@@ -5,7 +5,7 @@ const deny=/agent3-hosted-operation-denied/;
 function make(){
   const invoked=[];
   let valid=true, calls=0;
-  const commissioner={strictCommissioning:true,strictPhysicalFencing:true,companyCount:2,acquirePlacementOperation:async()=>({assertCurrent:async()=>{},release:async()=>{}}),async verifyHostedPreflight({company_id}={}){
+  const commissioner={strictCommissioning:true,strictPhysicalFencing:true,companyCount:2,acquirePlacementOperation:async()=>({assertCurrent:async()=>{},runWithContext:async operation=>operation(),release:async()=>{}}),async verifyHostedPreflight({company_id}={}){
     calls++;if(!valid)throw Error('revoked');
     if(company_id&&!['company-a','company-b'].includes(company_id))throw Error('foreign company');
     return {schema:'titan.agent3.hosted-preflight/v1',status:'verified',companies_verified:company_id?1:2};

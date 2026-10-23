@@ -18,7 +18,7 @@ async function fixture() {
  const state={company_id,placement_id:'registered-company-a',placement_revision:1,provider:'sqlite',schema_version:'v1',status:'READY'};
  const registry={async findByCompanyId(id){return id===C?{...state}:null;}};
  const ports={resolveCompanyStorage:async id=>id===C?storage:null,
-   acquirePlacementOperation:async p=>({...p,assertPlacementBound:async()=>{},release:async()=>{}}),
+   acquirePlacementOperation:async p=>({...p,assertPlacementBound:async()=>{},runWithContext:async operation=>operation(),release:async()=>{}}),
    runtimeRoutingPolicy:async({company_id,work_id})=>({company_id,work_id,mode:'native'})};
  const setting={schema:'titan.agent3.hosted-commissioning/v1',mode:'operator-authorized',enabled:true,company_ids:[C],ports,
   assertReady:async({company_ids})=>({schema:'titan.agent3.hosted-readiness/v1',company_ids,

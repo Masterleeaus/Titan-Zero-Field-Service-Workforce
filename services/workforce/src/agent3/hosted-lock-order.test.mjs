@@ -9,7 +9,7 @@ const make=()=>{
  const commissioned={strictCommissioning:true,strictPhysicalFencing:true,companyCount:2,
   verifyHostedPreflight:async x=>({schema:'titan.agent3.hosted-preflight/v1',status:'verified',companies_verified:x.company_id?1:2}),
   acquirePlacementOperation:async company_id=>{events.push('acquire:'+company_id);
-   return {assertCurrent:async()=>{},release:async()=>events.push('release:'+company_id)};}};
+   return {assertCurrent:async()=>{},runWithContext:async operation=>operation(),release:async()=>events.push('release:'+company_id)};}};
  const guard=createHostedAgent3Operations({runtime,commissioning:commissioned});
  return {events,runtime,guard};
 };

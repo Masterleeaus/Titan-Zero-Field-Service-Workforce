@@ -8,7 +8,7 @@ function fixture(){
   const company='company-a';let enabled=true,epoch=1,checks=0,calls=0;
   const companyState={get current(){return enabled;},disable(){enabled=false;},rotate(){epoch++;}};
   const initialEpoch=epoch;
-  const commissioning={strictCommissioning:true,strictPhysicalFencing:true,companyCount:1,acquirePlacementOperation:async()=>({assertCurrent:async()=>{},release:async()=>{}}),
+  const commissioning={strictCommissioning:true,strictPhysicalFencing:true,companyCount:1,acquirePlacementOperation:async()=>({assertCurrent:async()=>{},runWithContext:async operation=>operation(),release:async()=>{}}),
     async verifyHostedPreflight({company_id}={}){checks++;if(company_id!==company||!enabled||epoch!==initialEpoch)throw Error('revoked');
       return {schema:'titan.agent3.hosted-preflight/v1',status:'verified',companies_verified:1};}};
   const pending=deferred(),started=deferred();
@@ -44,7 +44,7 @@ test('unchanged company produces unchanged runtime result',async()=>{
 test('native errors remain native errors when company is still current',async()=>{
   const f=fixture(),original=new Error('native-provider-error');
   f.native.dispatch=async()=>{throw original;};
-  const guarded=createHostedAgent3Operations({runtime:f.native,commissioning:{strictCommissioning:true,strictPhysicalFencing:true,companyCount:1,acquirePlacementOperation:async()=>({assertCurrent:async()=>{},release:async()=>{}}),
+  const guarded=createHostedAgent3Operations({runtime:f.native,commissioning:{strictCommissioning:true,strictPhysicalFencing:true,companyCount:1,acquirePlacementOperation:async()=>({assertCurrent:async()=>{},runWithContext:async operation=>operation(),release:async()=>{}}),
     async verifyHostedPreflight(){return {schema:'titan.agent3.hosted-preflight/v1',status:'verified',companies_verified:1};}}});
   await assert.rejects(()=>guarded.dispatch({company_id:f.company}),e=>e===original);
 });
