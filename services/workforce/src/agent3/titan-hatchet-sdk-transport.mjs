@@ -15,6 +15,7 @@
  * is lost, the caller MUST mark the reservation uncertain, not retry it.
  */
 import { validId } from './titan-canonical-receiver.mjs';
+import {verifyProviderIdempotencyPolicy} from './titan-hatchet-provider-idempotency.mjs';
 
 const fail = code => { throw new Error(`hatchet-sdk-${code}`); };
 const bounded = (v, name) => {
@@ -54,10 +55,11 @@ const sameReservation = (row,input) => row &&
 /** Bind by trusted company/tenant only; only reads listed SDK capabilities. */
 export function createGovernedHatchetSdkTransport({
   durable, resolveClient, resolveRegisteredWorkflow, listCompleteRuns,
-  inspectRun, cancelRun, checkWorkerHealth, authorizeCancel,
+  inspectRun, cancelRun, checkWorkerHealth, authorizeCancel, inspectRegisteredWorkflowIdempotency,
 }={}) {
   requiredFn(durable,'getDispatch');
   requiredFn(durable,'claimSubmission');
+  requiredFn({inspectRegisteredWorkflowIdempotency},'inspectRegisteredWorkflowIdempotency');
   for (const [port,method] of [[{resolveClient},'resolveClient'],[{resolveRegisteredWorkflow},'resolveRegisteredWorkflow'],
     [{listCompleteRuns},'listCompleteRuns'],[{inspectRun},'inspectRun'],
     [{cancelRun},'cancelRun'],[{checkWorkerHealth},'checkWorkerHealth'],[{authorizeCancel},'authorizeCancel']]) requiredFn(port,method);
@@ -80,6 +82,14 @@ export function createGovernedHatchetSdkTransport({
       const workflow=await resolveRegisteredWorkflow({company_id:input.company_id,
         tenant:input.tenant,worker_id:input.worker_id,client});
       requiredFn(workflow,'runNoWait');
+      // Do not consume a canonical reservation until the provider's current
+      // registered engine-side idempotency has been independently verified.
+      let registeredPolicy;
+      try {registeredPolicy=await inspectRegisteredWorkflowIdempotency({
+        company_id:input.company_id,tenant:input.tenant,worker_id:input.worker_id,client,
+      });}
+      catch{fail('provider-idempotency-unavailable');}
+      verifyProviderIdempotencyPolicy(registeredPolicy,input);
       // Atomically spend the RESERVED record before crossing the external
       // boundary. After this point a crash, lost SDK ACK or concurrent caller
       // MUST reconcile, never send a second workflow from this reservation.

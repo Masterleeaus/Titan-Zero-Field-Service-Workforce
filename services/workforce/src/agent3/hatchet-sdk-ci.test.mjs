@@ -17,6 +17,7 @@ function fixture(){
  const durable=createCanonicalDurableDispatch({resolveCompanyStorage:async()=>storage,makeId:()=> 'reservation-ci'});
  const sdk=createGovernedHatchetSdkTransport({durable,
   resolveClient:async()=>({tenantId:TENANT}),
+  inspectRegisteredWorkflowIdempotency:async ({company_id,tenant,worker_id})=>({source:'trusted-registered-hatchet-workflow',verified:true,company_id,tenant,worker_id,workflow_name:'registered-staging-workflow',observed_at:new Date().toISOString(),idempotency:{strategy:'ttl',expression:'input.titan.idempotency_key',ttlMs:604800000}}),
   resolveRegisteredWorkflow:async()=>({async runNoWait(input){sends++;
    assert.equal(input.titan.schema,'titan.agent3.hatchet-input/v1');
    return {workflowRunId:'hatchet-run-ci'};}}),
