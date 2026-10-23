@@ -11,6 +11,7 @@
  * An operator health check covers the entire allowlist, not only recent users.
  */
 import { validId } from './titan-canonical-receiver.mjs';
+import { runWithHostedPlacementLockOrder } from './titan-hosted-lock-order.mjs';
 
 const fail=()=>{throw new Error('agent3-hosted-operation-denied');};
 const method=(owner,name)=>typeof owner?.[name]==='function';
@@ -44,6 +45,9 @@ export function createHostedAgent3Operations({runtime,commissioning,signal}={}) 
    */
   async function execute(input,operation){
     if(!validId(input?.company_id))fail();
+    return runWithHostedPlacementLockOrder(input.company_id,()=>executeFenced(input,operation));
+  }
+  async function executeFenced(input,operation){
     const company_id=input.company_id;
     await verify({company_id});
     let lease;
