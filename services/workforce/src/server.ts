@@ -8,6 +8,8 @@ import { SqliteWorkforceStore } from "./sqlite-store.js";
 import { createHostedRuntime, type HostedWorkforceDependencies } from "./hosted-runtime.js";
 import { createDirectAdminWorkforceOwners, type DirectAdminFetchHandler } from "./directadmin-workforce-owners.js";
 import { handleConversationRequest, readConversationBody, writeConversationResponse, conversationHttpStatus } from "./conversation-api.js";
+// @ts-expect-error Agent 3 public error classifier is intentionally plain JavaScript.
+import { agent3HostedErrorResponse } from "./agent3/titan-hosted-error-response.mjs";
 
 // @ts-expect-error Canonical execution boundary is JavaScript.
 import { boundedAdapterCall } from "../../../packages/tools/execution-gateway.mjs";
@@ -165,6 +167,12 @@ export async function createWorkforceServer(options: WorkforceServerOptions = {}
           signal.throwIfAborted();
           for (const key of ["authentication", "authority", "provider", "evidence"] as const) result[key] = observed[key] === true ? "ok" : "fail";
         }
+        // An operator-commissioned Agent 3 host cannot report READY if its
+        // allowlisted company placement or transport schema has drifted.
+        if (hosted?.runtime.verifyOperationalReady) {
+          try { await hosted.runtime.verifyOperationalReady(); result.agent3 = "ok"; }
+          catch { result.agent3 = "fail"; }
+        }
       } catch { result.runtime = "fail"; }
       return result;
     }, { timeoutMs: 1000, signal: lifecycle.signal }).catch(() => ({
@@ -222,6 +230,10 @@ export async function createWorkforceServer(options: WorkforceServerOptions = {}
       const ready = running && Object.values(status).every(value => value === "ok");
       json(response, ready ? 200 : 503, { status: ready ? "ok" : "degraded", service: "workforce", checks: status });
     })().catch(error => {
+      // An uncertain side effect MUST NOT be treated as safe for retry.
+      // Do not expose provider, tenant registry or credential exceptions.
+      const agent3Failure = agent3HostedErrorResponse(error);
+      if (agent3Failure) { json(response, agent3Failure.status, agent3Failure.body); return; }
       // Internal provider/database errors may contain credentials. Only bounded protocol codes leave the host.
       const code = error instanceof Error && (/^(conversation|zero)-[a-z-]+$/.test(error.message)
         || error.message === "identity-registry-unavailable") ? error.message : "conversation-failed";
