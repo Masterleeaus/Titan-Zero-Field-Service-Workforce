@@ -1,0 +1,58 @@
+/**
+ * Explicit operator-owned HOSTED commissioning gate. No public request or model
+ * instruction can turn it on. This checks pre-existing per-company migrations
+ * before a hosted Workforce process begins serving traffic; never auto-migrates.
+ *
+ * A trusted operator must independently attest current identity, authority,
+ * evidence, transport, and native entrypoint reviews. This attestation is NOT
+ * proof of live Hatchet availability or exhaustive bypass-path coverage.
+ */
+import { validId } from './titan-canonical-receiver.mjs';
+
+const TABLES = Object.freeze(['agent3_bridge_nonces','agent3_hatchet_transport','agent3_execution_owner']);
+const READY = Object.freeze(['identity','authority','evidence','transport','native_fences','placement']);
+const fail = () => { throw new Error('agent3-hosted-commissioning-denied'); };
+
+export async function resolveHostedAgent3Ports(setting, { signal } = {}) {
+  if (setting === undefined) return undefined; // Existing native host remains default.
+  if (signal?.aborted) fail();
+  if (!setting || setting.schema !== 'titan.agent3.hosted-commissioning/v1' ||
+      setting.mode !== 'operator-authorized' || setting.enabled !== true ||
+      !Array.isArray(setting.company_ids) || setting.company_ids.length === 0 || setting.company_ids.length > 1000 ||
+      !setting.company_ids.every(validId) || new Set(setting.company_ids).size !== setting.company_ids.length ||
+      typeof setting.assertReady !== 'function' || !setting.ports ||
+      typeof setting.ports !== 'object' || Array.isArray(setting.ports) ||
+      typeof setting.ports.resolveCompanyStorage !== 'function' ||
+      typeof setting.ports.runtimeRoutingPolicy !== 'function') fail();
+  const companies = new Set(setting.company_ids);
+  const attest = await setting.assertReady({company_ids: [...companies],signal});
+  if (signal?.aborted || attest?.schema !== 'titan.agent3.hosted-readiness/v1' ||
+      attest?.company_ids?.length !== companies.size ||
+      !attest.company_ids.every(company_id => companies.has(company_id)) ||
+      !READY.every(key => attest[key] === 'verified')) fail();
+  const source = setting.ports.resolveCompanyStorage;
+  for (const company_id of companies) {
+    if (signal?.aborted) fail();
+    const storage = await source(company_id);
+    if (typeof storage?.query !== 'function') fail();
+    const response = await storage.query(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ($1,$2,$3)", TABLES);
+    if (signal?.aborted || !Array.isArray(response?.rows) ||
+        response.rows.length !== TABLES.length ||
+        new Set(response.rows.map(row=>row.name)).size !== TABLES.length ||
+        response.rows.some(row=>!TABLES.includes(row.name))) fail();
+  }
+  return Object.freeze({
+    ...setting.ports,
+    resolveCompanyStorage: async company_id => {
+      if (!companies.has(company_id)) fail();
+      return source(company_id);
+    },
+    runtimeRoutingPolicy: async input => {
+      if (!companies.has(input?.company_id)) fail();
+      const decision = await setting.ports.runtimeRoutingPolicy(input);
+      if (decision?.company_id !== input.company_id || decision?.work_id !== input.work_id) fail();
+      return decision;
+    },
+  });
+}

@@ -12,6 +12,8 @@ import type { WorkforceZeroBridgeContext } from "../../../packages/titan-platfor
 import type { DirectAdminGatewayFactory } from "./directadmin-workforce-owners.js";
 import { AUTHENTICATED_SESSION_PROOF_TYPE, type AuthenticatedWorkIdentity } from "./index.js";
 import { createCompanyScopedWorkOrders, type HostedCompanyWorkOrderOperations } from "./company-scoped-work-orders.js";
+// @ts-expect-error Agent 3 operator-only integration module is deliberately plain JavaScript.
+import { resolveHostedAgent3Ports } from "./agent3/titan-hosted-commissioning.mjs";
 
 const derivedWorkforceSessionPrefix = "workforce-zero-";
 
@@ -19,6 +21,9 @@ export type HostedWorkforceDependencies = {
   identityStoragePath: string;
   /** Operator-configured adapter deadline; timeout never proves non-execution. */
   adapterTimeoutMs?: number;
+  /** Operator-injected, company-allowlisted Agent 3; absent means native-only. */
+  agent3Commissioning?: { schema: string; mode: string; enabled: boolean; company_ids: string[];
+    ports: Record<string, unknown>; assertReady(input: { company_ids: string[]; signal?: AbortSignal }): Promise<unknown>; };
   /** Authenticate cryptographically before returning these bound claims. */
   credentialVerifier: {
     verify(authorization: string, options?: { signal: AbortSignal }): Promise<VerifiedSessionIdentity & { audience: string; surface: ConversationSurface }>;
@@ -321,7 +326,9 @@ export async function createHostedRuntime(storage: StorageClient, identityStorag
   }
   // Only these public provider ports cross the hosted boundary. In particular,
   // never forward the legacy same-store transaction port from an adapter object.
+  const agent3Commissioning = await resolveHostedAgent3Ports(dependencies.agent3Commissioning, {signal});
   const runtime = await createFieldServiceRuntime({ storage, workOrders: companyWorkOrders, timeoutMs, signal, sessionAdmission,
+    ...(agent3Commissioning ? {agent3Commissioning} : {}),
     async revalidateIdentity(input: { company_id: string; actor_id: string; run_id: string }) {
       signal?.throwIfAborted();
       let loaded: Awaited<ReturnType<typeof loadRunIdentity>>;
