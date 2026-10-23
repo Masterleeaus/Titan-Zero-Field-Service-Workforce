@@ -23,9 +23,15 @@ const safeSubject=s=>{
     fail('explicit-nonproduction-confirmation-required');
   return s;
 };
-const verifiedApproval=(v,s)=>v?.allowed===true&&v.company_id===s.company_id&&v.work_id===s.work_id&&
-  v.actor_id===s.actor_id&&v.decision_ref===s.decision_ref&&v.environment==='isolated-staging'&&
-  v.expires_at && Number.isFinite(Date.parse(v.expires_at)) && Date.parse(v.expires_at)>Date.now();
+const verifiedApproval=(v,s)=>{
+  const expiry=Date.parse(v?.expires_at);
+  const time=Date.now();
+  // Staging one-shot approvals may not remain valid indefinitely, even when
+  // an upstream authorizer accidentally returns a long-lived blanket grant.
+  return v?.allowed===true&&v.company_id===s.company_id&&v.work_id===s.work_id&&
+    v.actor_id===s.actor_id&&v.decision_ref===s.decision_ref&&v.environment==='isolated-staging'&&
+    Number.isFinite(expiry)&&expiry>time&&expiry-time<=900000;
+};
 const checkedList=(v,s)=>{
   if(!v||v.complete!==true||v.next_cursor!==null||!Number.isSafeInteger(v.total)||v.total<0||v.total>100||
      !Array.isArray(v.runs)||v.total!==v.runs.length || v.runs.some(r=>r.company_id!==s.company_id||
@@ -52,9 +58,11 @@ export function createHatchetLiveStagingAcceptance({durable,transport,authorizeS
     if(!verifiedApproval(authority,s))fail('staging-authority-invalid');
     if(deployment?.verified!==true||deployment.environment!=='isolated-staging'||
        deployment.company_id!==s.company_id||deployment.tenant!==s.tenant||
-       deployment.worker_id!==s.worker_id||!validId(deployment.deployment_ref))fail('live-deployment-not-attested');
+       deployment.worker_id!==s.worker_id||!validId(deployment.deployment_ref)||
+       !validId(deployment.registration_revision))fail('live-deployment-not-attested');
     if(health?.state!=='HEALTHY'||health.tenant!==s.tenant||health.worker_id!==s.worker_id)fail('worker-not-healthy');
-    return {deployment_ref:deployment.deployment_ref};
+    return Object.freeze({deployment_ref:deployment.deployment_ref,
+      registration_revision:deployment.registration_revision});
   };
   const list=s=>transport.listRunsByMetadata({company_id:s.company_id,work_id:s.work_id,tenant:s.tenant,
     credential_ref:s.credential_ref,idempotency_key:s.idempotency_key,limit:101});
@@ -73,7 +81,7 @@ export function createHatchetLiveStagingAcceptance({durable,transport,authorizeS
     /** Single explicitly approved effect: no implicit retries, no polling storm. */
     async executeOnce(input){
       const s=safeSubject(input);
-      const {deployment_ref}=await attest(s);
+      const {deployment_ref,registration_revision}=await attest(s);
       const existing=await durable.getDispatch(s);
       if(existing)fail('reservation-exists-reconcile-first');
       const before=checkedList(await list(s),s);
@@ -91,7 +99,15 @@ export function createHatchetLiveStagingAcceptance({durable,transport,authorizeS
         // health AFTER reservation and immediately before provider egress.
         // A revoked approval never launches a workflow. The reservation stays
         // UNCERTAIN for supervised cleanup, not automatic resubmission.
-        await attest(s);
+        const current=await attest(s);
+        if(current.deployment_ref!==deployment_ref ||
+           current.registration_revision!==registration_revision)
+          fail('deployment-revision-changed-before-egress');
+        // The initial zero-run listing is NOT a lease on the provider.
+        // Re-observe after the reservation, immediately before the effect.
+        // Any newly visible run is ambiguous and cannot be submitted again.
+        const immediate=checkedList(await list(s),s);
+        if(immediate.total!==0)fail('provider-run-appeared-before-egress');
         // The SDK transport itself atomically claims this reservation before
         // provider egress. If ACK is lost, the permanent UNCERTAIN row remains.
         const response=await transport.submit(outbound);

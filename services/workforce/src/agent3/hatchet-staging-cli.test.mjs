@@ -15,8 +15,8 @@ function fixture(){
  return {
  durable:{reserveDispatch:async()=>({created:true,reservation_id:'reservation-cli'}),getDispatch:async()=>null,markAccepted:async()=>({hatchet_run_id:'run-cli'}),markUncertain:async()=>({state:'UNCERTAIN'})},
  transport:{submit:async()=>({hatchet_run_id:'run-cli'}),listRunsByMetadata:async()=>({complete:true,next_cursor:null,total:0,runs:[]}),runStatus:async()=>({status:'RUNNING'}),workerHealth:async()=>({worker_id:'test-worker',tenant:'test-tenant',state:'HEALTHY'})},
- authorizeStaging:async()=>({allowed:true,company_id:'test-company',work_id:'test-work',actor_id:'test-actor',decision_ref:'test-decision',environment:'isolated-staging',expires_at:'2099-01-01T00:00:00Z'}),
- attestDeployment:async()=>({verified:true,company_id:'test-company',tenant:'test-tenant',worker_id:'test-worker',environment:'isolated-staging',deployment_ref:'deployment-cli'}),
+ authorizeStaging:async()=>({allowed:true,company_id:'test-company',work_id:'test-work',actor_id:'test-actor',decision_ref:'test-decision',environment:'isolated-staging',expires_at:new Date(Date.now()+300000).toISOString()}),
+ attestDeployment:async()=>({verified:true,company_id:'test-company',tenant:'test-tenant',worker_id:'test-worker',environment:'isolated-staging',deployment_ref:'deployment-cli',registration_revision:'r1'}),
  };}`);
  const run=(env={},args=['--module',module,'--request',request,'--mode','inspect','--report',report])=>spawnSync(process.execPath,[cli,...args],{encoding:'utf8',timeout:10000,env:{...process.env,...env}});
  return {dir,module,request,report,run,close(){rmSync(dir,{recursive:true,force:true});}};
