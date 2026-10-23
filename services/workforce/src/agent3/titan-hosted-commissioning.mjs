@@ -43,8 +43,24 @@ export async function resolveHostedAgent3Ports(setting, { signal, companyPlaceme
     seenStorage.add(storage);
     await assertAgent3SqliteMigrations(storage);
   }
+  // Read-only post-startup diagnostic: verifies the same registered companies
+  // still have the expected schema and placement. It does not test live Hatchet.
+  async function verifyHostedPreflight(){
+    const seen=new Set();
+    for(const company_id of companies){
+      if(signal?.aborted)fail();
+      await placement.assertCurrent(company_id);
+      const storage=await source(company_id);
+      if(seen.has(storage))fail();
+      seen.add(storage);
+      await assertAgent3SqliteMigrations(storage);
+      await placement.assertCurrent(company_id);
+    }
+    return Object.freeze({schema:'titan.agent3.hosted-preflight/v1',companies_verified:companies.size,status:'verified'});
+  }
   return Object.freeze({
     ...setting.ports,
+    verifyHostedPreflight,
     strictCommissioning:true,
     resolveCompanyStorage: async company_id => {
       if(!companies.has(company_id))fail();
