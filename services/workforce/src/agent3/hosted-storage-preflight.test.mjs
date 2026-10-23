@@ -93,3 +93,14 @@ test('replay expiry must remain INTEGER',async()=>using(async f=>{
  f.db.exec('CREATE TABLE agent3_bridge_nonces(company_id TEXT NOT NULL,nonce TEXT NOT NULL,expires_at_unix TEXT NOT NULL,PRIMARY KEY(company_id,nonce))');
  await assert.rejects(()=>assertAgent3SqliteMigrations(f.storage),denied);
 }));
+
+
+test('post-startup preflight catches revoked company and deleted replay table',async()=>using(async f=>{
+ const p=await resolve(f);
+ assert.equal((await p.verifyHostedPreflight()).companies_verified,1);
+ f.state.status='DISABLED';
+ await assert.rejects(()=>p.verifyHostedPreflight(),denied);
+ f.state.status='READY';
+ f.db.exec('DROP TABLE agent3_bridge_nonces');
+ await assert.rejects(()=>p.verifyHostedPreflight(),denied);
+}));
