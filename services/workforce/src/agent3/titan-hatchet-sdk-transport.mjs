@@ -117,10 +117,13 @@ export function createGovernedHatchetSdkTransport({
       if (!response || response.complete!==true || response.next_cursor!==null ||
           !Number.isSafeInteger(response.total) || response.total<0 || response.total>100 ||
           !Array.isArray(response.runs) || response.total!==response.runs.length) fail('listing-not-complete');
+      const seenIds=new Set();
       const records=response.runs.map(value=>{
         if (value?.company_id!==request.company_id || value.work_id!==request.work_id ||
             value.idempotency_key!==request.idempotency_key || value.tenant!==request.tenant ||
             !validId(value.hatchet_run_id)) fail('listing-tenant-mismatch');
+        if(seenIds.has(value.hatchet_run_id)) fail('listing-duplicate-run-id');
+        seenIds.add(value.hatchet_run_id);
         return Object.freeze({company_id:value.company_id,work_id:value.work_id,
           idempotency_key:value.idempotency_key,tenant:value.tenant,hatchet_run_id:value.hatchet_run_id});
       });

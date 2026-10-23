@@ -48,6 +48,10 @@ export function createHatchetRunReconciler({ durable, resolvePlacement, listRuns
             !validId(record.hatchet_run_id)) throw new Error('reconcile-unverifiable-run');
         runIds.add(record.hatchet_run_id);
       }
+      // A provider inventory with repeated records is ambiguous, even when
+      // those records carry the SAME Hatchet run ID. Never collapse them
+      // into a unique run or release uncertain work for automatic retry.
+      if (runIds.size!==found.length) return {state:'MULTIPLE_RUNS_REVIEW',work_id,count:found.length,safe_to_retry:false};
       if (runIds.size===0) return {state:'NOT_FOUND_INCONCLUSIVE',work_id,safe_to_retry:false};
       if (runIds.size!==1) return {state:'MULTIPLE_RUNS_REVIEW',work_id,count:runIds.size,safe_to_retry:false};
       const hatchet_run_id=[...runIds][0];
