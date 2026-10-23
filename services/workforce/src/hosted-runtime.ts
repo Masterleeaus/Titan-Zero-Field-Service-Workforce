@@ -14,6 +14,8 @@ import { AUTHENTICATED_SESSION_PROOF_TYPE, type AuthenticatedWorkIdentity } from
 import { createCompanyScopedWorkOrders, type HostedCompanyWorkOrderOperations } from "./company-scoped-work-orders.js";
 // @ts-expect-error Agent 3 operator-only integration module is deliberately plain JavaScript.
 import { resolveHostedAgent3Ports } from "./agent3/titan-hosted-commissioning.mjs";
+// @ts-expect-error Source-pinned Agent 3 production guard is plain JavaScript.
+import { assertHostedNativeGateSafeToCommission } from "./agent3/titan-hosted-native-store-gate-safety.mjs";
 // @ts-expect-error Operator-owned Agent 3 integration is plain JavaScript.
 import { createHostedAgent3Operations } from "./agent3/titan-hosted-operational-guard.mjs";
 
@@ -328,6 +330,10 @@ export async function createHostedRuntime(storage: StorageClient, identityStorag
   }
   // Only these public provider ports cross the hosted boundary. In particular,
   // never forward the legacy same-store transaction port from an adapter object.
+  // Production safety: the existing company-store opener reacquires the same
+  // exclusive physical gate already held by commissioned Agent 3. Refuse
+  // commissioning until the actual canonical opener supports safe interop.
+  assertHostedNativeGateSafeToCommission(dependencies.agent3Commissioning);
   const agent3Commissioning = await resolveHostedAgent3Ports(dependencies.agent3Commissioning, {signal, companyPlacementRegistry:dependencies.companyPlacementRegistry});
   const runtime = await createFieldServiceRuntime({ storage, workOrders: companyWorkOrders, timeoutMs, signal, sessionAdmission,
     ...(agent3Commissioning ? {agent3Commissioning} : {}),
