@@ -326,7 +326,7 @@ export async function createHostedRuntime(storage: StorageClient, identityStorag
   }
   // Only these public provider ports cross the hosted boundary. In particular,
   // never forward the legacy same-store transaction port from an adapter object.
-  const agent3Commissioning = await resolveHostedAgent3Ports(dependencies.agent3Commissioning, {signal});
+  const agent3Commissioning = await resolveHostedAgent3Ports(dependencies.agent3Commissioning, {signal, companyPlacementRegistry:dependencies.companyPlacementRegistry});
   const runtime = await createFieldServiceRuntime({ storage, workOrders: companyWorkOrders, timeoutMs, signal, sessionAdmission,
     ...(agent3Commissioning ? {agent3Commissioning} : {}),
     async revalidateIdentity(input: { company_id: string; actor_id: string; run_id: string }) {
