@@ -44,6 +44,8 @@ jobs:
         run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-sdk-ci.test.mjs
       - name: Agent 3 separate-process SIGKILL and lost-ACK safety acceptance
         run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-process-crash.test.mjs
+      - name: Agent 3 read-only live-staging readiness and revocation acceptance
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-live-readiness.test.mjs
       - name: Agent 3 provider idempotency and no-retry acceptance
         run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-provider-idempotency.test.mjs
       - name: Agent 3 read-only staging crash recovery and no-retry contract
