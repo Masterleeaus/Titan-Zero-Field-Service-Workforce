@@ -67,3 +67,29 @@ test('different businesses cannot share one storage client in startup gate',asyn
  const setting={...f.setting,company_ids:[C,'company-b'],ports:{...f.ports,resolveCompanyStorage:async()=>f.storage}};
  await assert.rejects(()=>resolveHostedAgent3Ports(setting,{companyPlacementRegistry:registry}),denied);
 }));
+
+
+test('partial unique Hatchet indexes never count as global deduplication',async()=>using(async f=>{
+ f.db.exec('DROP TABLE agent3_hatchet_transport');
+ f.db.exec("CREATE TABLE agent3_hatchet_transport(company_id TEXT NOT NULL,work_id TEXT NOT NULL,worker_id TEXT NOT NULL,reservation_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,decision_ref TEXT NOT NULL,hatchet_run_id TEXT,state TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(company_id,work_id),CHECK(state IN ('RESERVED','ACCEPTED','UNCERTAIN')))");
+ f.db.exec("CREATE UNIQUE INDEX res_partial ON agent3_hatchet_transport(company_id,reservation_id) WHERE state='RESERVED'");
+ f.db.exec("CREATE UNIQUE INDEX key_partial ON agent3_hatchet_transport(company_id,idempotency_key) WHERE state='RESERVED'");
+ await assert.rejects(()=>assertAgent3SqliteMigrations(f.storage),denied);
+ await assert.rejects(()=>resolve(f),denied);
+}));
+test('partial execution claim index does not enforce sticky ownership',async()=>using(async f=>{
+ f.db.exec('DROP TABLE agent3_execution_owner');
+ f.db.exec("CREATE TABLE agent3_execution_owner(company_id TEXT NOT NULL,work_id TEXT NOT NULL,worker_id TEXT NOT NULL,engine TEXT NOT NULL,claim_id TEXT NOT NULL,policy_ref TEXT NOT NULL,state TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(company_id,work_id),CHECK(engine IN ('native','hatchet')),CHECK(state IN ('RESERVED','DISPATCHED','UNCERTAIN')))");
+ f.db.exec("CREATE UNIQUE INDEX claim_partial ON agent3_execution_owner(company_id,claim_id) WHERE state='RESERVED'");
+ await assert.rejects(()=>assertAgent3SqliteMigrations(f.storage),denied);
+}));
+test('nullable idempotency keys are rejected even with a UNIQUE index',async()=>using(async f=>{
+ f.db.exec('DROP TABLE agent3_hatchet_transport');
+ f.db.exec("CREATE TABLE agent3_hatchet_transport(company_id TEXT NOT NULL,work_id TEXT NOT NULL,worker_id TEXT NOT NULL,reservation_id TEXT NOT NULL,idempotency_key TEXT,decision_ref TEXT NOT NULL,hatchet_run_id TEXT,state TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(company_id,work_id),UNIQUE(company_id,reservation_id),UNIQUE(company_id,idempotency_key),CHECK(state IN ('RESERVED','ACCEPTED','UNCERTAIN')))");
+ await assert.rejects(()=>assertAgent3SqliteMigrations(f.storage),denied);
+}));
+test('replay expiry must remain INTEGER',async()=>using(async f=>{
+ f.db.exec('DROP TABLE agent3_bridge_nonces');
+ f.db.exec('CREATE TABLE agent3_bridge_nonces(company_id TEXT NOT NULL,nonce TEXT NOT NULL,expires_at_unix TEXT NOT NULL,PRIMARY KEY(company_id,nonce))');
+ await assert.rejects(()=>assertAgent3SqliteMigrations(f.storage),denied);
+}));
