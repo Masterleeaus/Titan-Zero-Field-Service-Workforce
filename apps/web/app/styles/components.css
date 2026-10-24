@@ -1365,6 +1365,20 @@
 .warning-inline { color: var(--color-amber-600, #d97706); font-size: 13px; margin: 0 0 8px; }
 .success-inline { color: #065f46; font-size: 13px; margin: 0 0 8px; }
 .error-message { background: var(--color-red-100); border: 1px solid #fecaca; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+.web-session-expiry-warning,
+.web-session-login-notice {
+  background: #fff4e5;
+  border: 2px solid #9a6700;
+  border-radius: 8px;
+  color: #5f370e;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 12px 16px;
+}
+.web-session-expiry-warning { margin: 0 0 16px; }
+.web-session-login-notice { margin: 0 0 16px; }
+.web-session-duration-note { color: var(--fg-muted); font-size: 14px; line-height: 1.5; margin: 0 0 16px; }
 .line-items-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .line-items-table th { text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--border); font-weight: 600; font-size: 13px; color: var(--fg-muted); }
 .line-items-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }

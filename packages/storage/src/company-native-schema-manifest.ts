@@ -109,9 +109,43 @@ export const companyNativeWorkOrdersVisitsManifest: CompanyNativeSchemaManifest 
   ]),
 });
 
+/** Additive visit-local checklist state. The task row retains work-order
+ * lifecycle state; disposition and note belong to this visit's task link. */
+export const companyNativeVisitChecklistManifest: CompanyNativeSchemaManifest = Object.freeze({
+  format: "titan-company-native-fsm-manifest/v1",
+  owner: "COMPANY_NATIVE_FSM",
+  profile_id: "native-visit-checklist-v3",
+  schema_version: "company-native-visit-checklist-v3",
+  schema_scope: companyNativeWorkOrdersVisitsManifest.schema_scope,
+  source_provenance: Object.freeze([
+    ...companyNativeWorkOrdersVisitsManifest.source_provenance,
+    Object.freeze({
+      path: "db/sqlite/company-native/0003_visit_checklist_state.sql",
+      sha256: "e067b641056a93a1b3096d8df28a69f76756a84b7d006b4594c8df4e347cd206",
+      included_objects: Object.freeze(["visit_tasks.disposition", "visit_tasks.note", "visit_tasks.updated_at"]),
+      excluded_objects: Object.freeze(["accepted_evidence", "company_registry"]),
+      adaptations: Object.freeze([
+        "visit-local inspection disposition and note do not overwrite work-order task lifecycle status",
+        "no evidence ledger or identity/placement tables are copied into the company profile",
+      ]),
+    }),
+  ]),
+  schema_fingerprint_sha256: "96a055ace01a768ecc74c9b7931e844d8fa4ef82f3963573099c08612d971b13",
+  migrations: Object.freeze([
+    ...companyNativeWorkOrdersVisitsManifest.migrations,
+    Object.freeze({
+      sequence: 3,
+      migration_id: "company-native-fsm/0003-visit-checklist-state",
+      path: "db/sqlite/company-native/0003_visit_checklist_state.sql",
+      sha256: "e067b641056a93a1b3096d8df28a69f76756a84b7d006b4594c8df4e347cd206",
+    }),
+  ]),
+});
+
 const manifestsByVersion = new Map<string, CompanyNativeSchemaManifest>([
   [companyNativeWorkOrdersManifest.schema_version, companyNativeWorkOrdersManifest],
   [companyNativeWorkOrdersVisitsManifest.schema_version, companyNativeWorkOrdersVisitsManifest],
+  [companyNativeVisitChecklistManifest.schema_version, companyNativeVisitChecklistManifest],
 ]);
 
 export function getCompanyNativeSchemaManifest(schemaVersion: string): CompanyNativeSchemaManifest | null {

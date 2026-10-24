@@ -34,7 +34,7 @@ describe.skipIf(!RUN_HTTP_INTEGRATION)("Auth API (HTTP integration)", () => {
     it("authenticates with valid credentials and sets HTTP-only cookie", async () => {
       const response = await login();
       expect(response.status).toBe(200);
-      expect(response.headers.get("set-cookie") ?? "").toContain("fsm_session=");
+      expect(response.headers.get("set-cookie") ?? "").toContain("__Host-titan-web-session=");
       expect(response.headers.get("set-cookie") ?? "").toContain("HttpOnly");
 
       const body = await json<{ user: { email: string; role: string } }>(response);
@@ -107,7 +107,7 @@ describe.skipIf(!RUN_HTTP_INTEGRATION)("Auth API (HTTP integration)", () => {
 
       expect(response.status).toBe(200);
       expect((await json<{ message: string }>(response)).message).toBe("ok");
-      expect(response.headers.get("set-cookie") ?? "").toContain("fsm_session=");
+      expect(response.headers.get("set-cookie") ?? "").toContain("__Host-titan-web-session=");
     });
   });
 

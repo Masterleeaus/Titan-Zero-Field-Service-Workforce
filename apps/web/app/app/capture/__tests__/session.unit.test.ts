@@ -25,8 +25,8 @@ describe("capture post-login allowlist", () => {
   });
 
   it("sends unauthenticated /app/capture to login with next", () => {
-    expect(loginRedirectForPath("/app/capture")).toBe("/login?next=/app/capture");
-    expect(loginRedirectForPath("/app")).toBe("/login");
+    expect(loginRedirectForPath("/app/capture")).toBe("/login?reason=signin-required&next=%2Fapp%2Fcapture");
+    expect(loginRedirectForPath("/app")).toBe("/login?reason=signin-required&next=%2Fapp");
   });
 
   it("reads /app/capture from request headers", () => {

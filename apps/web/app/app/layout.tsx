@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { headers } from "next/headers";
-import { getSession } from "@/lib/auth/session";
+import { getCurrentWebSession } from "@/lib/auth/session";
 import { getDatabaseDialect } from "@/lib/db/dialect";
 import { portableQuery } from "@/lib/db/portable";
 import { businessToday } from "@/lib/operations/business-day";
 import { AppShell } from "@/components/AppShell";
+import { WebSessionExpiryBoundary } from "@/components/WebSessionExpiryBoundary";
 import {
   CAPTURE_PATH,
   loginRedirectForPath,
@@ -21,12 +22,23 @@ export default async function AppLayout({
 }) {
   const headerList = await headers();
   const pathname = pathnameFromHeaders(headerList);
-  const session = await getSession();
-  // Known standalone app paths can round-trip safely through /login?next=.
-  if (!session) redirect(loginRedirectForPath(pathname) as Route);
+  const currentSession = await getCurrentWebSession();
+  // Return to a reachable protected page after the user completes fresh sign-in.
+  if (!currentSession) redirect(loginRedirectForPath(pathname) as Route);
+
+  const session = currentSession.session;
+  const expiresAt = currentSession.context.expires_at;
+  const expiresAtMs = Date.parse(expiresAt);
+  const remainingMs = Number.isFinite(expiresAtMs)
+    ? Math.max(0, expiresAtMs - Date.now())
+    : 0;
 
   if (pathname === CAPTURE_PATH) {
-    return <>{children}</>;
+    return (
+      <WebSessionExpiryBoundary expiresAt={expiresAt} remainingMs={remainingMs}>
+        {children}
+      </WebSessionExpiryBoundary>
+    );
   }
 
   const [users, reviewRows] = await Promise.all([
@@ -45,7 +57,13 @@ export default async function AppLayout({
   const reviewPending = reviewRows[0]?.pending ?? false;
 
   return (
-    <AppShell role={session.role} userName={userName} reviewPending={reviewPending}>
+    <AppShell
+      role={session.role}
+      userName={userName}
+      reviewPending={reviewPending}
+      sessionExpiresAt={expiresAt}
+      sessionRemainingMs={remainingMs}
+    >
       {children}
     </AppShell>
   );

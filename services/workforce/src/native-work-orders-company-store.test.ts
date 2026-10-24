@@ -111,7 +111,7 @@ test("company-scoped consumer verifies the physical schema and applies the requi
       database_url: "postgres://attacker/company-b", path: "/tmp/company-b.sqlite",
       signal: new AbortController().signal };
     const read = await consumer.read(input);
-    assert.deepEqual(read, { id: "work-a", status: "in_progress", completed_at: null });
+    assert.deepEqual(read, { id: "work-a", status: "in_progress", completed_at: null, evidence_context: null });
 
     // A valid current session for A cannot be used to ask this consumer to open B.
     await assert.rejects(
@@ -141,7 +141,7 @@ test("company-scoped consumer verifies the physical schema and applies the requi
     } };
     await assert.rejects(consumer.complete({ ...input, authorityFence }), /authority-not-allowed:DENY/);
     const afterDenied = await consumer.read(input);
-    assert.deepEqual(afterDenied, { id: "work-a", status: "in_progress", completed_at: null });
+    assert.deepEqual(afterDenied, { id: "work-a", status: "in_progress", completed_at: null, evidence_context: null });
 
     const drifted = createSqliteStorage(companyPath);
     await drifted.query("CREATE TABLE unapproved_native_object(id TEXT PRIMARY KEY)");

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { verifyCompanyNativeSchemaAttestation } from "./company-native-schema-attestation.js";
-import { companyNativeWorkOrdersManifest, companyNativeWorkOrdersVisitsManifest } from "./company-native-schema-manifest.js";
+import { companyNativeVisitChecklistManifest, companyNativeWorkOrdersManifest, companyNativeWorkOrdersVisitsManifest } from "./company-native-schema-manifest.js";
 import { initializeFreshCompanyNativeStore } from "./company-native-store-initializer.js";
 import { computeCompanyNativeSchemaManifestDigest, fingerprintCompanyNativeSchema } from "./company-native-schema-attestation.js";
 import { createSqliteStorage } from "./sqlite-client.js";
@@ -265,5 +265,48 @@ describe("fresh native-work-orders-visits-v2 schema producer", () => {
     await expect(verifyCompanyNativeSchemaAttestation({
       storage, placement, manifest: companyNativeWorkOrdersVisitsManifest,
     })).rejects.toMatchObject({ code: "company-native-schema-fingerprint-mismatch" });
+  });
+});
+
+describe("fresh native-visit-checklist-v3 schema producer", () => {
+  it("pins the additive visit-local checklist migration and keeps task lifecycle fields separate", async () => {
+    for (const migration of companyNativeVisitChecklistManifest.migrations) {
+      const bytes = await readFile(new URL(`../../../${migration.path}`, import.meta.url));
+      expect(createHash("sha256").update(bytes).digest("hex")).toBe(migration.sha256);
+    }
+    const storage = memoryStore();
+    const v3Placement = { ...placement, schema_version: companyNativeVisitChecklistManifest.schema_version };
+    await initializeFreshCompanyNativeStore({ storage, placement: v3Placement, company_profile: companyProfile });
+    const columns = (await storage.query<{ name: string }>("PRAGMA table_info(visit_tasks)")).rows.map(row => row.name);
+    expect(columns).toContain("disposition");
+    expect(columns).toContain("note");
+    expect(columns).toContain("updated_at");
+    const workOrderColumns = (await storage.query<{ name: string }>("PRAGMA table_info(work_order_tasks)")).rows.map(row => row.name);
+    expect(workOrderColumns).toContain("status");
+    expect(workOrderColumns).toContain("completed");
+    expect((await storage.query("SELECT name FROM sqlite_master WHERE type='table' AND name='evidence'")).rows).toEqual([]);
+    await expect(verifyCompanyNativeSchemaAttestation({
+      storage,
+      placement: v3Placement,
+      manifest: companyNativeVisitChecklistManifest,
+    })).resolves.toMatchObject({ schema_version: companyNativeVisitChecklistManifest.schema_version });
+  });
+
+  it("does not mutate an existing v2 company store to add checklist state", async () => {
+    const storage = memoryStore();
+    await initializeFreshCompanyNativeStore({ storage, placement, company_profile: companyProfile });
+    const before = (await storage.query<{ name: string; sql: string | null }>(
+      "SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name",
+    )).rows;
+    const v3Placement = { ...placement, schema_version: companyNativeVisitChecklistManifest.schema_version };
+    await expect(initializeFreshCompanyNativeStore({ storage, placement: v3Placement, company_profile: companyProfile }))
+      .rejects.toMatchObject({ code: "company-native-schema-store-not-fresh" });
+    await expect(verifyCompanyNativeSchemaAttestation({
+      storage, placement, manifest: companyNativeWorkOrdersVisitsManifest,
+    })).resolves.toMatchObject({ schema_version: companyNativeWorkOrdersVisitsManifest.schema_version });
+    const after = (await storage.query<{ name: string; sql: string | null }>(
+      "SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name",
+    )).rows;
+    expect(after).toEqual(before);
   });
 });

@@ -1,78 +1,54 @@
-/**
- * GET /api/v1/visits/[id]/checklist
- *
- * Returns checklist items for the visit, seeding from the default template
- * on first access (idempotent — UNIQUE constraint prevents duplicates).
- *
- * Access: any authenticated user; tech restricted to assigned visit server-side.
- */
+/** GET /api/v1/visits/[id]/checklist — read the registered company's checklist. */
 import { NextRequest, NextResponse } from "next/server";
-import { withAuth } from "../../../../../../lib/auth/middleware";
-import type { AuthSession } from "../../../../../../lib/auth/middleware";
+import { CompanyStorageResolutionError } from "../../../../../../../../packages/storage/src/company-storage-resolver";
+import { companyNativeVisitChecklistManifest } from "../../../../../../../../packages/storage/src/company-native-schema-manifest";
+import { isWebAuthSetupRequiredError } from "../../../../../../lib/auth/web-session-runtime";
 import { logger } from "../../../../../../lib/logger";
-import { withChecklistContext, getOrSeedChecklist } from "../../../../../../lib/visits/checklist";
+import { withWebNativeCompanyStore } from "../../../../../../lib/company-storage/request-runtime";
+import { listNativeVisitChecklist } from "../../../../../../lib/visits/native-checklist";
+import { getTraceId } from "../../../../../../lib/tracing";
 
 export const dynamic = "force-dynamic";
 
-export const GET = withAuth(
-  async (request: NextRequest, session: AuthSession) => {
-    const id = request.url.match(/\/visits\/([^/]+)\/checklist/)?.[1];
+function visitIdFromRequest(request: NextRequest): string | null {
+  const match = request.nextUrl.pathname.match(/\/visits\/([^/]+)\/checklist\/?$/);
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]); } catch { return null; }
+}
 
-    if (!id) {
-      return NextResponse.json(
-        { error: { code: "NOT_FOUND", message: "Visit not found", traceId: session.traceId } },
-        { status: 404 }
-      );
+function unavailable(error: unknown): boolean {
+  return error instanceof CompanyStorageResolutionError
+    || isWebAuthSetupRequiredError(error)
+    || (error instanceof Error && (error.message === "identity-registry-unavailable"
+      || error.message === "native-company-schema-version-unsupported"
+      || error.message === "company-placement-registry-schema-unavailable"
+      || error.message.startsWith("native-company-runtime-config-required:")));
+}
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const traceId = getTraceId(request);
+  const visitId = visitIdFromRequest(request);
+  if (!visitId) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Visit not found", traceId } }, { status: 404 });
+  try {
+    const result = await withWebNativeCompanyStore({
+      request,
+      requiredSchemaVersion: companyNativeVisitChecklistManifest.schema_version,
+      operation: (client, session) => listNativeVisitChecklist(client, session, visitId),
+    });
+    if (!result.authenticated) {
+      return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "Authentication required", traceId } }, { status: 401 });
     }
-
-    try {
-      const items = await withChecklistContext(session, async (client) => {
-        // Verify the visit exists and belongs to this account.
-        // Tech users may only access their assigned visits.
-        const { rows: visitRows } = await client.query<{
-          id: string;
-          assigned_user_id: string | null;
-          visit_type: string;
-          job_type: string | null;
-        }>(
-          `SELECT v.id, v.assigned_user_id, v.visit_type, j.job_type
-             FROM visits v
-             JOIN jobs   j ON j.id = v.job_id AND j.account_id = v.account_id
-            WHERE v.id = $1 AND v.account_id = $2`,
-          [id, session.accountId]
-        );
-
-        if (!visitRows[0]) {
-          return null;
-        }
-
-        if (session.role === "tech" && visitRows[0].assigned_user_id !== session.userId) {
-          return null;
-        }
-
-        return getOrSeedChecklist(
-          client,
-          session.accountId,
-          id,
-          visitRows[0].job_type ?? undefined,
-          visitRows[0].visit_type ?? undefined
-        );
-      });
-
-      if (items === null) {
-        return NextResponse.json(
-          { error: { code: "NOT_FOUND", message: "Visit not found", traceId: session.traceId } },
-          { status: 404 }
-        );
-      }
-
-      return NextResponse.json({ data: items });
-    } catch (err) {
-      logger.error("[checklist GET]", err, { traceId: session.traceId });
-      return NextResponse.json(
-        { error: { code: "INTERNAL_ERROR", message: "Failed to load checklist", traceId: session.traceId } },
-        { status: 500 }
-      );
+    if (result.value === null) {
+      return NextResponse.json({ error: { code: "NOT_FOUND", message: "Visit not found", traceId } }, { status: 404 });
     }
+    return NextResponse.json({ data: result.value.items, visit: result.value.visit });
+  } catch (error) {
+    if (unavailable(error)) {
+      return NextResponse.json({
+        error: { code: "NATIVE_COMPANY_STORAGE_UNAVAILABLE", message: "Native company storage is unavailable.", traceId },
+      }, { status: 503 });
+    }
+    logger.error("[native checklist GET]", error, { traceId });
+    return NextResponse.json({ error: { code: "INTERNAL_ERROR", message: "Failed to load checklist", traceId } }, { status: 500 });
   }
-);
+}

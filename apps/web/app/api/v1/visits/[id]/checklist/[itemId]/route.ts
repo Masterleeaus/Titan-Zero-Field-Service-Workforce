@@ -1,99 +1,68 @@
-/**
- * PATCH /api/v1/visits/[id]/checklist/[itemId]
- *
- * Update disposition and/or note on a single checklist item.
- * Requires at least one of { disposition, note } in the request body.
- *
- * Access: all roles; tech restricted to assigned visit server-side.
- */
+/** PATCH /api/v1/visits/[id]/checklist/[itemId] — update visit-local state. */
 import { NextRequest, NextResponse } from "next/server";
-import { withAuth } from "../../../../../../../lib/auth/middleware";
-import type { AuthSession } from "../../../../../../../lib/auth/middleware";
-import { logger } from "../../../../../../../lib/logger";
 import { updateChecklistItemSchema } from "@titan-zero/domain";
-import {
-  withChecklistContext,
-  updateChecklistItem,
-} from "../../../../../../../lib/visits/checklist";
+import { CompanyStorageResolutionError } from "../../../../../../../../../packages/storage/src/company-storage-resolver";
+import { companyNativeVisitChecklistManifest } from "../../../../../../../../../packages/storage/src/company-native-schema-manifest";
+import { isWebAuthSetupRequiredError } from "../../../../../../../lib/auth/web-session-runtime";
+import { withWebNativeCompanyStore } from "../../../../../../../lib/company-storage/request-runtime";
+import { logger } from "../../../../../../../lib/logger";
+import { updateNativeVisitChecklistItem } from "../../../../../../../lib/visits/native-checklist";
+import { getTraceId } from "../../../../../../../lib/tracing";
 
 export const dynamic = "force-dynamic";
 
-export const PATCH = withAuth(
-  async (request: NextRequest, session: AuthSession) => {
-    const visitMatch = request.url.match(/\/visits\/([^/]+)\/checklist\/([^/]+)/);
-    const visitId = visitMatch?.[1];
-    const itemId = visitMatch?.[2];
+function idsFromRequest(request: NextRequest): { visitId: string; itemId: string } | null {
+  const match = request.nextUrl.pathname.match(/\/visits\/([^/]+)\/checklist\/([^/]+)\/?$/);
+  if (!match) return null;
+  try { return { visitId: decodeURIComponent(match[1]), itemId: decodeURIComponent(match[2]) }; }
+  catch { return null; }
+}
 
-    if (!visitId || !itemId) {
-      return NextResponse.json(
-        { error: { code: "NOT_FOUND", message: "Checklist item not found", traceId: session.traceId } },
-        { status: 404 }
-      );
-    }
+function unavailable(error: unknown): boolean {
+  return error instanceof CompanyStorageResolutionError
+    || isWebAuthSetupRequiredError(error)
+    || (error instanceof Error && (error.message === "identity-registry-unavailable"
+      || error.message === "native-company-schema-version-unsupported"
+      || error.message === "company-placement-registry-schema-unavailable"
+      || error.message.startsWith("native-company-runtime-config-required:")));
+}
 
-    const body = await request.json().catch(() => null);
-    const parsed = updateChecklistItemSchema.safeParse(body);
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const traceId = getTraceId(request);
+  const ids = idsFromRequest(request);
+  if (!ids) return NextResponse.json({ error: { code: "NOT_FOUND", message: "Checklist item not found", traceId } }, { status: 404 });
 
-    if (!parsed.success) {
-      return NextResponse.json(
-        {
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "Invalid request body",
-            details: parsed.error.flatten().fieldErrors,
-            traceId: session.traceId,
-          },
-        },
-        { status: 422 }
-      );
-    }
-
-    try {
-      const updated = await withChecklistContext(session, async (client) => {
-        // Verify visit exists, belongs to account, and tech authorization.
-        const { rows: visitRows } = await client.query(
-          `SELECT id, assigned_user_id FROM visits WHERE id = $1 AND account_id = $2`,
-          [visitId, session.accountId]
-        );
-
-        if (!visitRows[0]) {
-          return null as "notfound" | null;
-        }
-
-        if (session.role === "tech" && visitRows[0].assigned_user_id !== session.userId) {
-          return "forbidden" as "forbidden";
-        }
-
-        return updateChecklistItem(
-          client,
-          session.accountId,
-          visitId,
-          itemId,
-          parsed.data
-        );
-      });
-
-      if (updated === null || updated === "notfound") {
-        return NextResponse.json(
-          { error: { code: "NOT_FOUND", message: "Checklist item not found", traceId: session.traceId } },
-          { status: 404 }
-        );
-      }
-
-      if (updated === "forbidden") {
-        return NextResponse.json(
-          { error: { code: "FORBIDDEN", message: "Access denied", traceId: session.traceId } },
-          { status: 403 }
-        );
-      }
-
-      return NextResponse.json({ data: updated });
-    } catch (err) {
-      logger.error("[checklist PATCH]", err, { traceId: session.traceId });
-      return NextResponse.json(
-        { error: { code: "INTERNAL_ERROR", message: "Failed to update checklist item", traceId: session.traceId } },
-        { status: 500 }
-      );
-    }
+  const body = await request.json().catch(() => null);
+  const parsed = updateChecklistItemSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: {
+      code: "VALIDATION_ERROR",
+      message: "Invalid request body",
+      details: parsed.error.flatten().fieldErrors,
+      traceId,
+    } }, { status: 422 });
   }
-);
+
+  try {
+    const result = await withWebNativeCompanyStore({
+      request,
+      requiredSchemaVersion: companyNativeVisitChecklistManifest.schema_version,
+      operation: (client, session) => updateNativeVisitChecklistItem(client, session, ids.visitId, ids.itemId, parsed.data),
+    });
+    if (!result.authenticated) {
+      return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "Authentication required", traceId } }, { status: 401 });
+    }
+    if (!result.value) {
+      return NextResponse.json({ error: { code: "NOT_FOUND", message: "Checklist item not found", traceId } }, { status: 404 });
+    }
+    return NextResponse.json({ data: result.value });
+  } catch (error) {
+    if (unavailable(error)) {
+      return NextResponse.json({
+        error: { code: "NATIVE_COMPANY_STORAGE_UNAVAILABLE", message: "Native company storage is unavailable.", traceId },
+      }, { status: 503 });
+    }
+    logger.error("[native checklist PATCH]", error, { traceId });
+    return NextResponse.json({ error: { code: "INTERNAL_ERROR", message: "Failed to update checklist item", traceId } }, { status: 500 });
+  }
+}

@@ -38,6 +38,32 @@ describe("registered company placement lifecycle", () => {
     await business.close();
   });
 
+  it("provisions an explicitly selected registered checklist profile with matching attestation", async () => {
+    const f = await fixture();
+    const created = await provisionSqliteCompanyPlacement({
+      registry: f.registry, company_id: "company-checklist", company_name: "Checklist Company",
+      schema_version: "company-native-visit-checklist-v3",
+    });
+    const database = await createSqliteCompanyPlacementRegistry({ storage: f.storage, storage_role: "GLOBAL_REGISTRY" });
+    const placement = await database.findByCompanyId("company-checklist");
+    expect(placement).toMatchObject({ status: "READY", placement_id: created.placement_id,
+      schema_version: "company-native-visit-checklist-v3" });
+    const company = await createSqliteStorage(join(f.registry.companyStoreRoot, `${created.placement_id}.sqlite`));
+    expect((await company.query<{ schema_version: string; placement_revision: number }>(
+      "SELECT schema_version,placement_revision FROM titan_company_native_schema_attestation WHERE company_id=$1",
+      ["company-checklist"],
+    )).rows).toEqual([{ schema_version: "company-native-visit-checklist-v3", placement_revision: 1 }]);
+    await company.close();
+  });
+
+  it("rejects an unknown schema profile before reserving placement rows", async () => {
+    const f = await fixture();
+    await expect(provisionSqliteCompanyPlacement({ registry: f.registry, company_id: "company-unknown",
+      company_name: "Unknown", schema_version: "company-native-made-up-v9" }))
+      .rejects.toThrow("company-placement-schema-profile-unknown");
+    expect((await f.storage.query("SELECT company_id FROM titan_company_storage_placements")).rowCount).toBe(0);
+  });
+
   it("leaves failed provisioning non-ready and retries with a fresh physical identity", async () => {
     const f = await fixture();
     await expect(provisionSqliteCompanyPlacement({ registry: f.registry, company_id: "company-b", company_name: " " }))

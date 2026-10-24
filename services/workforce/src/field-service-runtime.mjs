@@ -8,10 +8,31 @@ import { SqliteAuthorityStore, AuthorityContextResolver, WorkerAccessResolver, S
 import { ExecutionGateway, boundedAdapterCall, executionRequestFingerprint } from '../../../packages/tools/execution-gateway.mjs';
 import { GovernedExecutionRecovery, SqliteExecutionLifecycleStore } from '../../../packages/tools/governed-execution-recovery.mjs';
 import { AcceptedEvidenceLedger, rebuildJobProjection } from '../../../packages/tools/accepted-evidence-ledger.mjs';
+import { resolveAcceptedEvidenceReferencesInTransaction } from './accepted-evidence-reference-resolver.mjs';
 
 const CAPABILITY = 'crm.work_order.complete';
 const command = text => /^complete work order ([a-zA-Z0-9_-]+)$/i.exec(String(text).trim())?.[1] ?? null;
 const one = async (storage, sql, params) => (await storage.query(sql, params)).rows[0] ?? null;
+const TASK_DISPOSITIONS = new Set(['ok', 'fix_now', 'monitor', 'optional', 'refer']);
+export function verifiedTaskLineageFromProducerEvent(evidence) {
+  const observed = evidence.observed_result;
+  const verification = evidence.verification;
+  const observedContext = observed?.evidence_context;
+  const verifiedContext = verification?.evidence_context;
+  if (verification?.verified !== true || !observedContext || !verifiedContext
+    || !isDeepStrictEqual(observedContext, verifiedContext)) return null;
+  const { company_id, work_order_id, visit_id, task_id, disposition } = verifiedContext;
+  if (company_id !== evidence.company_id || work_order_id !== evidence.request_summary?.input?.work_order_id
+    || ![visit_id, task_id].every(value => typeof value === 'string' && value.trim())
+    || !TASK_DISPOSITIONS.has(disposition)) return null;
+  return Object.freeze({ company_id, work_order_id, visit_id, task_id, disposition });
+}
+export function assertReplayTaskLineage(priorPayload, currentBusiness) {
+  const priorContext = priorPayload?.accepted_evidence?.request_summary?.canonical_operation_context;
+  if (priorContext && !isDeepStrictEqual(priorContext, currentBusiness?.evidence_context)) {
+    throw new Error('zero-replay-task-context-no-longer-verified');
+  }
+}
 
 /** Bounded production composition, using the existing business completion owner.
  * Authority material is read, never issued here. The explicit command adapter is
@@ -124,14 +145,42 @@ export async function createFieldServiceRuntime({ storage, workOrders, revalidat
       // Rebuild through the canonical ledger inside the append transaction. The
       // existing evidence table remains the durable owner; no parallel ledger.
       const history = await tx.query("SELECT payload FROM evidence WHERE company_id=$1 AND subject_type='work' AND subject_id=$2 AND evidence_type='gateway_execution' ORDER BY rowid", [company_id, work_id]);
+      // The ExecutionGateway's immutable terminal evidence_id is the canonical
+      // persisted reference for this independent verification when the provider
+      // has no separate verification record ID. Never derive an ID from execution
+      // input or a caller-supplied label.
+      const verificationId = evidence.state === 'VERIFIED' && evidence.verification?.verified === true
+        ? (evidence.verification.verification_id === undefined
+          ? evidence.evidence_id
+          : typeof evidence.verification.verification_id === 'string' && evidence.verification.verification_id.trim()
+            ? evidence.verification.verification_id.trim()
+            : null)
+        : null;
+      if (evidence.state === 'VERIFIED' && evidence.verification?.verified === true && !verificationId) {
+        throw new Error('zero-verification-reference-invalid');
+      }
+      const verifiedEvidence = verificationId && evidence.verification?.verification_id !== verificationId
+        ? { ...evidence, verification: { ...evidence.verification, verification_id: verificationId } }
+        : evidence;
+      const taskLineage = verifiedEvidence.state === 'VERIFIED' ? verifiedTaskLineageFromProducerEvent(verifiedEvidence) : null;
+      // The work order and actor originate from the current authority decision;
+      // visit/task/disposition only come from equal execution and independent
+      // reread contexts returned by the native company-store owner.
+      const persistedEvidence = taskLineage ? {
+        ...verifiedEvidence,
+        request_summary: { ...verifiedEvidence.request_summary,
+          canonical_operation_context: taskLineage },
+        observed_result: { ...verifiedEvidence.observed_result, ...taskLineage },
+        verification: { ...verifiedEvidence.verification, ...taskLineage },
+      } : verifiedEvidence;
       const ledger = new AcceptedEvidenceLedger();
       for (const row of history.rows) {
         const prior = JSON.parse(row.payload);
         ledger.now = () => prior.accepted_evidence?.recorded_at ?? prior.finished_at;
         ledger.append({ ...prior, ...prior.accepted_evidence });
       }
-      ledger.now = () => evidence.finished_at;
-      const accepted_evidence = ledger.append(evidence);
+      ledger.now = () => persistedEvidence.finished_at;
+      const accepted_evidence = ledger.append(persistedEvidence);
       const run = await one(tx, 'SELECT payload FROM agent_runs WHERE company_id=$1 AND run_id=$2', [company_id, run_id]);
       const identity = run ? JSON.parse(run.payload) : {};
       const provenance = { decision_id: current.decision_id, company_id, actor_id: current.actor_id,
@@ -140,9 +189,10 @@ export async function createFieldServiceRuntime({ storage, workOrders, revalidat
         trace_id: identity.trace_id ?? null, correlation_id: identity.correlation_id ?? null,
         interaction_id: identity.interaction_id ?? null,
         idempotency_key: identity.idempotency_key ?? idempotency_key, execution_idempotency_key: idempotency_key,
-        source_evidence_refs: current.evidence_refs, effect_authority_decision_id: effectDecision?.decision_id ?? null };
+        source_evidence_refs: current.evidence_refs, effect_authority_decision_id: effectDecision?.decision_id ?? null,
+        ...(taskLineage ?? {}) };
       await tx.query('INSERT INTO evidence(id,company_id,subject_type,subject_id,evidence_type,provenance,payload) VALUES($1,$2,$3,$4,$5,$6,$7)',
-        [evidence.evidence_id, company_id, 'work', work_id, 'gateway_execution', JSON.stringify(provenance), JSON.stringify({ ...evidence, provenance, accepted_evidence })]);
+        [persistedEvidence.evidence_id, company_id, 'work', work_id, 'gateway_execution', JSON.stringify(provenance), JSON.stringify({ ...persistedEvidence, provenance, accepted_evidence })]);
     };
     const admitExecution = async (evidence, business) => {
       const admit = async ({ proof, authenticated_identity, signal: fenceSignal, acquire_deadline_ms } = {}) => storage.transaction(async tx => {
@@ -201,7 +251,9 @@ export async function createFieldServiceRuntime({ storage, workOrders, revalidat
           if (!row) return null;
           const business = await readBusiness(businessInput);
           if (business?.status !== 'completed' || !business.completed_at) throw new Error('zero-replay-outcome-no-longer-verified');
-          return toResult(JSON.parse(row.payload));
+          const prior = JSON.parse(row.payload);
+          assertReplayTaskLineage(prior, business);
+          return toResult(prior);
         },
         // VERIFIED evidence is the durable replay record, already committed by record().
         async set(_key, result) {
@@ -231,7 +283,14 @@ export async function createFieldServiceRuntime({ storage, workOrders, revalidat
         async verify(_raw, request) {
           await currentIdentity({ company_id, actor_id: current.actor_id, run_id, work_id }, request.signal);
           const business = await readBusiness(businessInput, request.signal);
-          return { verified: business?.status === 'completed' && !!business.completed_at, method: 'independent-company-scoped-business-reread', work_order_id: current.work_order_id, observed_status: business?.status ?? null };
+          const observedContext = _raw?.result?.evidence_context;
+          const currentContext = business?.evidence_context;
+          const evidence_context = observedContext && currentContext && isDeepStrictEqual(observedContext, currentContext)
+            ? currentContext : null;
+          return { verified: business?.status === 'completed' && !!business.completed_at,
+            method: 'independent-company-scoped-business-reread', work_order_id: current.work_order_id,
+            observed_status: business?.status ?? null,
+            ...(evidence_context ? { evidence_context, ...evidence_context } : {}) };
         },
       }],
     });
@@ -309,7 +368,20 @@ export async function createFieldServiceRuntime({ storage, workOrders, revalidat
     });
     const accepted_projections = [...new Set(accepted_evidence.map(e => e.work_id))].map(acceptedWorkId => rebuildJobProjection(accepted_evidence, { company_id, job_id: acceptedWorkId }));
     const verified = accepted_projections.some(projection => projection.status === 'VERIFIED' && accepted_evidence.some(e => e.evidence_id === projection.provenance.terminal_evidence_id && e.verification?.verified === true && e.verification.work_order_id === id));
-    return { work, run, business, evidence, accepted_evidence, accepted_projections, outcome: verified && business?.status === 'completed' ? 'verified' : run?.state === 'FAILED' ? 'failed' : work.state.startsWith('WAITING') ? 'waiting' : 'unverified' };
+    const outcome = verified && business?.status === 'completed' ? 'verified' : run?.state === 'FAILED' ? 'failed' : work.state.startsWith('WAITING') ? 'waiting' : 'unverified';
+    const context = business?.evidence_context;
+    const accepted_evidence_references = outcome === 'verified'
+      && context?.company_id === company_id && context?.work_order_id === id
+      ? await resolveAcceptedEvidenceReferences({ company_id, work_id,
+        visit_id: context.visit_id, work_order_id: context.work_order_id,
+        task_id: context.task_id, disposition: context.disposition })
+      : [];
+    return { work, run, business, evidence, accepted_evidence, accepted_projections,
+      accepted_evidence_references, outcome };
   }
-  return Object.freeze({ ...bootstrap, project, lifecycleStore, recover: input => bootstrap.zeroDispatcher.recoverInterrupted(input) });
+  async function resolveAcceptedEvidenceReferences(criteria) {
+    return storage.transaction(tx => resolveAcceptedEvidenceReferencesInTransaction(tx, criteria));
+  }
+  return Object.freeze({ ...bootstrap, project, resolveAcceptedEvidenceReferences, lifecycleStore,
+    recover: input => bootstrap.zeroDispatcher.recoverInterrupted(input) });
 }

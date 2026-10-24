@@ -20,7 +20,7 @@ async function login() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: "admin@test.com", password: "password" }),
   });
-  return res.headers.get("set-cookie")?.match(/fsm_session=[^;]+/)?.[0] ?? "";
+  return res.headers.get("set-cookie")?.match(/__Host-titan-web-session=[^;]+/)?.[0] ?? "";
 }
 
 describe.skipIf(!RUN_HTTP_INTEGRATION)("Internal endpoints", () => {

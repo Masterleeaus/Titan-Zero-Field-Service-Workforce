@@ -11,6 +11,10 @@ test("provider acknowledgement maps to factual execution evidence but not verifi
 
 test("verified execution requires independent verification and carries verification lineage",()=>{
  assert.throws(()=>executionEvidenceToBusinessEvidence({...base,state:"VERIFIED",verification:null}),/verification-required/);
+ assert.throws(()=>executionEvidenceToBusinessEvidence({...base,state:"VERIFIED",verification:{verified:true}}),/verification-id-required/);
+ for(const verification_id of ["","   ",{},"verify-1\ninvalid"]){
+  assert.throws(()=>executionEvidenceToBusinessEvidence({...base,state:"VERIFIED",verification:{verified:true,verification_id}}),/verification-id-(required|invalid)/);
+ }
  const e=executionEvidenceToBusinessEvidence({...base,state:"VERIFIED",verification:{verified:true,verification_id:"verify-1",method:"canonical-reread"},final_outcome:"verified"});
  assert.equal(e.event_type,"execution.verified");assert.equal(e.verification_id,"verify-1");assert.equal(e.payload.final_outcome,"verified");
 });

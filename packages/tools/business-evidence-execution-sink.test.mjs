@@ -42,6 +42,7 @@ const request = {
 
 test("ExecutionGateway routes ACK and verified outcomes into company-scoped canonical evidence", async () => {
   const store = memoryStore();
+  const sink = createBusinessEvidenceExecutionSink({ store });
   const gateway = createBusinessEvidenceExecutionGateway({
     store,
     providers: [{
@@ -70,6 +71,22 @@ test("ExecutionGateway routes ACK and verified outcomes into company-scoped cano
   const rowCount = store.rows.size;
   await sink(result.evidence);
   assert.equal(store.rows.size, rowCount);
+});
+
+test("verified producer without a reference cannot persist a verified job fact", async () => {
+  const store = memoryStore();
+  const gateway = createBusinessEvidenceExecutionGateway({
+    store,
+    providers: [{
+      id: "native-field-service", executionClass: EXECUTION_CLASSES.NATIVE, capabilities: ["job.complete"],
+      execute: async () => ({ external_ref: "work-order-2", result: { status: "completed" } }),
+      verify: async () => ({ verified: true, method: "canonical-reread" }),
+    }],
+  });
+  const result = await gateway.execute({ ...request, idempotency_key: "job-1-complete-no-verification-reference" });
+  assert.equal(result.state, "UNCERTAIN");
+  assert.equal([...store.rows.values()].some(row => row.event_type === "job.status.verified"), false);
+  assert.equal([...store.rows.values()].some(row => row.event_type === "execution.verified"), false);
 });
 
 test("stable evidence identities repair a partial append and make sink replay idempotent", async () => {

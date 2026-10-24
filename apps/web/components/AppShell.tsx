@@ -13,6 +13,7 @@ import { CAPTURE_HREF, CaptureLink } from "./CaptureLink";
 import { WorkspaceAutoRoute } from "./WorkspaceAutoRoute";
 import { LiveRefresh } from "./LiveRefresh";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { WebSessionExpiryBoundary } from "./WebSessionExpiryBoundary";
 import { GlobalSearch } from "./GlobalSearch";
 import {
   IconDashboard,
@@ -214,10 +215,19 @@ interface AppShellProps {
   role: Role;
   userName?: string;
   reviewPending?: boolean;
+  sessionExpiresAt: string;
+  sessionRemainingMs: number;
   children: ReactNode;
 }
 
-export function AppShell({ role, userName, reviewPending, children }: AppShellProps) {
+export function AppShell({
+  role,
+  userName,
+  reviewPending,
+  sessionExpiresAt,
+  sessionRemainingMs,
+  children,
+}: AppShellProps) {
   const pathname = usePathname();
   // The sidebar follows the surface you're on: My Day = field, everything else =
   // office. So Field never shows the Overview home and vice-versa.
@@ -478,7 +488,9 @@ export function AppShell({ role, userName, reviewPending, children }: AppShellPr
               toggle or daily popup. This renders nothing; it only steers entry. */}
           {role === "owner" && <WorkspaceAutoRoute />}
           <ConnectionStatus />
-          {children}
+          <WebSessionExpiryBoundary expiresAt={sessionExpiresAt} remainingMs={sessionRemainingMs}>
+            {children}
+          </WebSessionExpiryBoundary>
         </main>
 
         {/* ---- Mobile bottom tab bar ---- */}

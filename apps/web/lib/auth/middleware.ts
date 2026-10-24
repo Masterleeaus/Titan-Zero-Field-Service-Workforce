@@ -3,6 +3,7 @@ import { getSession } from "./session";
 import { hasRole } from "./permissions";
 import type { Role } from "@titan-zero/domain";
 import { getTraceId } from "../tracing";
+import { isWebAuthSetupRequiredError } from "./web-session-runtime";
 
 export interface AuthSession {
   userId: string;
@@ -25,7 +26,27 @@ export async function requireAuth(
   | { success: false; response: NextResponse }
 > {
   const traceId = getTraceId(request);
-  const session = await getSession();
+  let session: Awaited<ReturnType<typeof getSession>>;
+  try {
+    session = await getSession();
+  } catch (error) {
+    if (isWebAuthSetupRequiredError(error)) {
+      return { success: false, response: NextResponse.json({ error: {
+        code: "WEB_AUTH_SETUP_REQUIRED",
+        message: "Web authentication needs operator configuration.",
+        missing_configuration: error.missing_or_invalid,
+        traceId,
+      } }, { status: 503 }) };
+    }
+    if (error instanceof Error && error.message === "identity-registry-unavailable") {
+      return { success: false, response: NextResponse.json({ error: {
+        code: "IDENTITY_REGISTRY_UNAVAILABLE",
+        message: "Identity services are temporarily unavailable.",
+        traceId,
+      } }, { status: 503 }) };
+    }
+    throw error;
+  }
 
   if (!session) {
     const response = NextResponse.json(
