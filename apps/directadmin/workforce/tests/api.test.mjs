@@ -16,8 +16,8 @@ test('consumer uses actual shared session routes and preserves REQUESTED acknowl
   await Promise.all([api.discover(ctx), api.status(ctx)]); assert.equal(session.calls.length, 1);
   const receipt = await api.control(ctx, { action: 'pause', work_id: 'work1', reason: 'Operator request', authority: 'root' });
   assert.equal(receipt.state, 'REQUESTED'); assert.deepEqual(receipt.evidence_refs, []);
-  assert.deepEqual(session.calls[1], ['intent', 'titan_workforce', { company_id: 'company-a', actor_id: 'actor-a', capability_id: 'canonical.pause', operation_id: 'fixture-id', correlation_id: 'fixture-id', input: { action: 'pause', work_id: 'work1', reason: 'Operator request' } }]);
-  await api.status(ctx); assert.equal(session.calls.length, 3); // post-effect refresh, not cached work truth
+  assert.deepEqual(session.calls[2], ['intent', 'titan_workforce', { company_id: 'company-a', actor_id: 'actor-a', capability_id: 'canonical.pause', operation_id: 'fixture-id', correlation_id: 'fixture-id', input: { action: 'pause', work_id: 'work1', reason: 'Operator request' } }]);
+  await api.status(ctx); assert.equal(session.calls.length, 4); // fresh pre-control and post-effect projections, not cached work truth
 });
 test('unsupported control and undiscovered capability never reach intent transport', async () => {
   for (const action of ['shell', 'resume', 'revoke']) {
@@ -88,12 +88,12 @@ test('reassignment consumes the published READY descriptor and sends an assignee
     requires_fresh_approval: true, grants_authority: false }];
   const workers = [
     { company_id: 'company-a', worker_id: 'worker-old', kind: 'digital', active: true, capabilities: [] },
-    { company_id: 'company-a', worker_id: 'worker-target', kind: 'digital', active: true, capabilities: ['work.site.schedule'] },
+    { company_id: 'company-a', worker_id: 'worker-target', kind: 'digital', active: true, capabilities: [] },
     { company_id: 'company-a', worker_id: 'worker-inactive', kind: 'human', active: false, capabilities: [] },
   ];
   const work = [
     { company_id: 'company-a', work_id: 'ready-work', state: 'READY', assignee: 'worker-old',
-      required_capabilities: ['work.site.schedule'], context_refs: [], evidence_refs: [] },
+      required_capabilities: [], context_refs: [], evidence_refs: [] },
     { company_id: 'company-a', work_id: 'active-work', state: 'IN_PROGRESS', assignee: 'worker-old', context_refs: [], evidence_refs: [] },
   ];
   const session = fixture(controls, workers, work); const api = new WorkforceApi(session, () => 'operation-a');
@@ -144,7 +144,7 @@ test('unassigned READY work binds expected_assignee_id to null', async () => {
   const session = fixture([{ action: 'reassign', capability_id: 'titan.workforce.reassign',
     requires_fresh_approval: true, grants_authority: false }],
   [{ company_id: 'company-a', worker_id: 'target', kind: 'human', active: true, capabilities: [] }],
-  [{ company_id: 'company-a', work_id: 'ready-work', state: 'READY', context_refs: [], evidence_refs: [] }]);
+  [{ company_id: 'company-a', work_id: 'ready-work', state: 'READY', required_capabilities: [], context_refs: [], evidence_refs: [] }]);
   const api = new WorkforceApi(session, () => 'operation-unassigned');
   await api.control(context, { action: 'reassign', work_id: 'ready-work', target_worker_id: 'target', reason: 'Assign the ready item' });
   const intent = session.calls.find(([kind]) => kind === 'intent');
