@@ -6,6 +6,8 @@ import { WorkforceService } from "./index.js";
 import { WorkforceRuntimeAdapter } from "./runtime-adapter.js";
 import { SqliteWorkforceStore } from "./sqlite-store.js";
 import { ZeroWorkforceRuntimeDispatcher } from "./zero-runtime-dispatcher.js";
+// Agent 3 transport integrations only; canonical work and evidence remain Titan-owned.
+import { createCanonicalAgent3Commissioning } from "./agent3/titan-hatchet-commissioning.mjs";
 
 const requiredMethod=(owner,name,label)=>{if(!owner||typeof owner[name]!=="function")throw new Error(`production-runtime-port-required:${label}.${name}`);};
 
@@ -67,7 +69,27 @@ export async function createProductionRuntimeBootstrap({storage,ports,eventBus}=
     eventBus:events,
   });
   const runtimeAdapter=new WorkforceRuntimeAdapter(runtime);
-  const workforce=new WorkforceService(workforceStore,runtimeAdapter,undefined,workforceStore);
+  let workforceRuntime=runtimeAdapter;
+  let zeroExecutionRuntime=runtime;
+  let agent3=null;
+  if(ports?.agent3Commissioning){
+    // All required service owners come from trusted host configuration, never
+    // a caller, worker or website parameter. Partial cutover fails closed.
+    agent3=createCanonicalAgent3Commissioning({
+      ...ports.agent3Commissioning,
+      workforceStore,workerStore:workforceStore,
+      nativeRuntime:runtimeAdapter,
+      nativeRunLookup:({company_id,work_id})=>runStore.findByWork(company_id,work_id),
+      zeroNativeRuntime:runtime,
+      canonicalRunById:({company_id,run_id})=>runStore.get(company_id,run_id),
+      strictCommissioning:true,
+    });
+    // Migration is deliberately NOT implicit here; the authorized company
+    // provisioning owner calls agent3.migrate(company_id) BEFORE work ingress.
+    workforceRuntime=agent3.runtime;
+    zeroExecutionRuntime=agent3.zeroRuntime;
+  }
+  const workforce=new WorkforceService(workforceStore,workforceRuntime,undefined,workforceStore);
 
   // One canonical Zero -> Workforce -> persistent-runtime bridge. Keep dispatch as
   // a compatibility alias so existing composition roots do not gain a second path.
@@ -75,7 +97,7 @@ export async function createProductionRuntimeBootstrap({storage,ports,eventBus}=
     workforce,
     workforceStore,
     workforceStore,
-    runtime,
+    zeroExecutionRuntime,
     (fn) => storage.transaction(async (tx) => {
       const store = new SqliteWorkforceStore(tx);
       // Lifecycle preparation must not auto-wake a second runtime.
@@ -85,7 +107,8 @@ export async function createProductionRuntimeBootstrap({storage,ports,eventBus}=
   const dispatch=(input)=>zeroDispatcher.dispatch(input);
 
   return Object.freeze({
-    storage,runStore,workforceStore,runtime,events,workforce,zeroDispatcher,dispatch,
+    storage,runStore,workforceStore,runtime:zeroExecutionRuntime,events,workforce,zeroDispatcher,dispatch,
+    agent3,
     authorityGateway:authority.authorityGateway,
     authorityStore:authority.authorityStore,
     authorityContextResolver:authority.authorityContextResolver,

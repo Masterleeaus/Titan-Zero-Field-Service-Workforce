@@ -17,7 +17,7 @@ const one = async (storage, sql, params) => (await storage.query(sql, params)).r
  * Authority material is read, never issued here. The explicit command adapter is
  * deliberately limited; it is not a general language planner or another engine.
  */
-export async function createFieldServiceRuntime({ storage, workOrders, revalidateIdentity, sessionAdmission, timeoutMs = 30_000, signal } = {}) {
+export async function createFieldServiceRuntime({ storage, workOrders, revalidateIdentity, sessionAdmission, agent3Commissioning, timeoutMs = 30_000, signal } = {}) {
   if (!storage || storage.dialect !== 'sqlite') throw new Error('zero-sqlite-storage-required');
   for (const method of ['complete', 'read']) if (typeof workOrders?.[method] !== 'function') throw new Error(`production-runtime-port-required:workOrders.${method}`);
   if (revalidateIdentity !== undefined && typeof revalidateIdentity !== 'function') throw new Error('production-runtime-port-required:revalidateIdentity');
@@ -287,6 +287,7 @@ export async function createFieldServiceRuntime({ storage, workOrders, revalidat
     } },
     contextProvider: { async load({ company_id }) { return { company_id }; } },
     authorityGateway: { authorize, execute, resume, prepareRecovery },
+    ...(agent3Commissioning ? { agent3Commissioning } : {}),
   } });
 
   async function project({ company_id, actor_id, work_id }) {

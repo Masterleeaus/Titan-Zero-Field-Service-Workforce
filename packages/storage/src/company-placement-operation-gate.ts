@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdir, open, readFile, rm, lstat } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -6,9 +7,34 @@ export interface CompanyPlacementOperationGate {
   run<T>(operation: () => Promise<T>, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<T>;
   acquire(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<() => Promise<void>>;
   acquireMaintenance(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<() => Promise<void>>;
+  /** Operator-only outer lease: executes native clients with the already held lock.
+   * Native open/query/transaction calls retain their own gate interfaces.
+   * Callers must keep the lease open until the full effect has settled.
+   */
+  acquireBorrowable(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<{
+    run<T>(operation: () => Promise<T>): Promise<T>;
+    release(): Promise<void>;
+  }>;
 }
 
 interface OperationGateOptions { signal?: AbortSignal; timeoutMs?: number; }
+
+/** Scope can only be minted after this canonical gate holds the physical lock.
+ * Matching by physical gate path lets existing native opener instances reuse
+ * the lock. No request object or forged "owner token" can create a scope.
+ */
+interface BorrowedPlacementScope {
+  readonly lockPath: string;
+  active: boolean;
+}
+const borrowedPlacement = new AsyncLocalStorage<BorrowedPlacementScope>();
+function matchingBorrowedPlacement(path: string): boolean {
+  const current=borrowedPlacement.getStore();
+  if (!current?.active) return false;
+  if (current.lockPath !== path) throw new Error("company-placement-borrowed-cross-placement-denied");
+  return true;
+}
+
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -79,9 +105,47 @@ export function createCompanyPlacementOperationGate(lockDirectory: string, place
   };
   return Object.freeze({
     async acquire(options: OperationGateOptions = {}) {
+      if (options.signal?.aborted) throw new Error("company-placement-operation-aborted");
+      // This is safe ONLY inside an AsyncLocalStorage context minted by
+      // acquireBorrowable while this very physical path is locked.
+      if (matchingBorrowedPlacement(lockPath)) return async () => {};
       return acquireMutex(options, deadlineOf(options), true);
     },
+    async acquireBorrowable(options: OperationGateOptions = {}) {
+      if (borrowedPlacement.getStore()?.active) {
+        throw new Error("company-placement-borrowed-nested-denied");
+      }
+      const physicalRelease=await acquireMutex(options,deadlineOf(options),true);
+      let closed=false;
+      let running=false;
+      return Object.freeze({
+        async run<T>(operation: () => Promise<T>): Promise<T> {
+          if (closed || typeof operation !== "function") {
+            throw new Error("company-placement-borrowed-scope-invalid");
+          }
+          // A nested verification on the very same proven context does NOT
+          // mint another lease. It runs under the outer active scope. Another
+          // asynchronous caller cannot enter a currently running lease.
+          if (running) {
+            if (!matchingBorrowedPlacement(lockPath)) throw new Error("company-placement-borrowed-scope-invalid");
+            return operation();
+          }
+          if (options.signal?.aborted) throw new Error("company-placement-operation-aborted");
+          running=true;
+          const scope: BorrowedPlacementScope={lockPath,active:true};
+          try { return await borrowedPlacement.run(scope,operation); }
+          finally { scope.active=false;running=false; }
+        },
+        async release() {
+          if (closed || running) throw new Error("company-placement-borrowed-release-invalid");
+          closed=true;
+          await physicalRelease();
+        },
+      });
+    },
     async acquireMaintenance(options: OperationGateOptions = {}) {
+      // Maintenance must never borrow a running business operation lock.
+      if (borrowedPlacement.getStore()?.active) throw new Error("company-placement-borrowed-maintenance-denied");
       const deadline = deadlineOf(options);
       const token = randomUUID();
       while (true) {

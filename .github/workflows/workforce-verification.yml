@@ -33,6 +33,36 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @titan-zero/workforce typecheck
       - run: pnpm --filter @titan-zero/workforce test
+      - name: Agent 3 canonical native-opener borrowed-lease acceptance
+        run: |
+          # Native better-sqlite3 company-store opener, not an in-memory mock.
+          # Mandatory for any Agent 3 approval: unlike src/*.test.ts the
+          # agent3/*.test.mjs suite is not covered by the default test command.
+          pnpm --filter @titan-zero/workforce exec node --test src/agent3/real-native-company-store-opener.test.mjs
+          pnpm --filter @titan-zero/workforce exec node --test src/agent3/borrowed-placement-gate.test.mjs
+      - name: Agent 3 Hatchet SDK governed transport acceptance
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-sdk-ci.test.mjs
+      - name: Agent 3 separate-process SIGKILL and lost-ACK safety acceptance
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-process-crash.test.mjs
+      - name: Agent 3 read-only live-staging readiness and revocation acceptance
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-live-readiness.test.mjs
+      - name: Agent 3 provider-inventory ambiguity and no-duplicate-reconciliation acceptance
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-listing-ambiguity.test.mjs
+      - name: Agent 3 staging drill evidence and rollback acceptance
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-staging-drill-ci.test.mjs
+      - name: Agent 3 staging drill full-source revalidation and rollback revocation acceptance
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-staging-revalidation-ci.test.mjs
+      - name: Agent 3 provider idempotency and no-retry acceptance
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-provider-idempotency.test.mjs
+      - name: Agent 3 read-only staging crash recovery and no-retry contract
+        run: pnpm --filter @titan-zero/workforce exec node --test src/agent3/hatchet-staging-recovery-ci.test.mjs
+      - name: Agent 3 staging deployment evidence and crash-durable journal
+        run: |
+          pnpm --filter @titan-zero/workforce exec node --test \
+            src/agent3/hatchet-deployment-evidence.test.mjs \
+            src/agent3/hatchet-staging-journal.test.mjs \
+            src/agent3/hatchet-staging-acceptance.test.mjs \
+            src/agent3/hatchet-staging-cli.test.mjs
       - name: Focused native Workforce contract lane
         run: pnpm --filter @titan-zero/titan-platform test:workforce-native
       - name: Focused company-native storage typecheck and tests
